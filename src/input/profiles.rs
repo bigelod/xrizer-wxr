@@ -9,11 +9,11 @@ use super::{
     action_manifest::ControllerType, legacy::LegacyBindings, skeletal::SkeletalInputBindings,
 };
 use crate::input::profiles::typemagic::ContainsPath;
-use crate::openxr_data::Hand;
+use crate::winlatorxr::Hand;
 use glam::Mat4;
 use knuckles::Knuckles;
 use oculus_touch::OculusTouch;
-use openxr as xr;
+use crate::winlatorxr as xr;
 use simple_controller::SimpleController;
 use std::ffi::CStr;
 use std::marker::PhantomData;
@@ -308,7 +308,7 @@ trait Subpath {
 /// Represents the final component of an input path, i.e. the `click` part
 /// of /user/hand/left/input/trigger/click
 pub trait Component {
-    type Output: xr::ActionInput;
+    type Output: xr::ActionTy;
     const DYN: Option<paths::DynComponent>;
 }
 

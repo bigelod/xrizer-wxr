@@ -5,7 +5,7 @@ use super::{
 use crate::button_mask_from_ids;
 use crate::input::legacy::{self, LegacyBindings, button_mask_from_id};
 use crate::input::profiles::DynInputPath;
-use crate::openxr_data::Hand;
+use crate::winlatorxr::{Hand, ExtensionSet};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use openvr::EVRButtonId;
 use std::iter::Iterator;
@@ -36,7 +36,7 @@ impl InteractionProfile for Knuckles {
     fn profile_path() -> &'static str {
         "/interaction_profiles/valve/index_controller"
     }
-    fn has_required_extensions(_: &openxr::ExtensionSet) -> bool {
+    fn has_required_extensions(_: &crate::winlatorxr::ExtensionSet) -> bool {
         true
     }
     fn properties() -> &'static ProfileProperties {
@@ -147,7 +147,7 @@ impl InteractionProfile for Knuckles {
 mod tests {
     use super::{InteractionProfile, Knuckles};
     use crate::input::{ActionData, tests::Fixture};
-    use openxr as xr;
+    use crate::winlatorxr as xr;
 
     #[test]
     fn verify_bindings() {
@@ -186,7 +186,7 @@ mod tests {
         );
 
         let handle = f.get_action_handle(c"/actions/set1/in/boolact");
-        let data = f.input.openxr.session_data.get();
+        let data = f.input.winlatorxr.session_data.read().unwrap();
         let actions = data.input_data.get_loaded_actions().unwrap();
         let action = actions.try_get_action(handle).unwrap();
         let extra = actions.try_get_extra(handle).unwrap();
@@ -196,7 +196,7 @@ mod tests {
         };
 
         let grab_data = extra.grab_actions.as_ref().unwrap();
-        let p = f.input.openxr.instance.string_to_path(path).unwrap();
+        let p = f.input.winlatorxr.instance.string_to_path(path).unwrap();
         let suggested = fakexr::get_suggested_bindings(grab_data.force_action.as_raw(), p);
         assert!(suggested.contains(&"/user/hand/right/input/squeeze/force".to_string()));
 
@@ -228,7 +228,7 @@ mod tests {
             ["/user/hand/left/input/thumbstick".into()],
         );
 
-        f.verify_bindings::<xr::Haptic>(
+        f.verify_bindings::<xr::HapticTy>(
             path,
             c"/actions/set1/in/vib",
             [

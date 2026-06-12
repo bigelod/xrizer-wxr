@@ -1,21 +1,22 @@
 use crate::{
     clientcore::{Injected, Injector},
     input::Input,
-    openxr_data::{Hand, RealOpenXrData, SessionData},
+    winlatorxr::{Hand, RealOpenXrData, SessionData},
     overlay::OverlayMan,
     tracy_span,
+    winlatorxr::*,
 };
+use crate::winlatorxr as xr;
 use glam::{Mat3, Quat, Vec3};
 use log::{debug, error, trace, warn};
 use openvr as vr;
-use openxr as xr;
 use std::ffi::{CStr, CString};
 use std::sync::{Arc, Mutex};
 
 #[derive(Copy, Clone)]
 pub struct ViewData {
-    pub flags: xr::ViewStateFlags,
-    pub views: [xr::View; 2],
+    pub flags: ViewStateFlags,
+    pub views: [View; 2],
 }
 
 #[derive(Copy, Clone)]
@@ -34,20 +35,20 @@ struct ViewCache {
 impl ViewCache {
     fn get_views(
         &mut self,
-        session: &SessionData,
-        display_time: xr::Time,
-        ty: xr::ReferenceSpaceType,
+        session: &SessionData<DirectX11>,
+        display_time: XrTime,
+        ty: ReferenceSpaceType,
     ) -> ViewData {
         match ty {
-            xr::ReferenceSpaceType::VIEW => {
+            ReferenceSpaceType::View => {
                 self.view
                     .get_or_insert_with(|| Self::get_views_view_space(session, display_time))
                     .data
             }
-            xr::ReferenceSpaceType::LOCAL | xr::ReferenceSpaceType::STAGE => {
+            ReferenceSpaceType::Local | ReferenceSpaceType::Stage => {
                 let view = match ty {
-                    xr::ReferenceSpaceType::LOCAL => &mut self.local,
-                    xr::ReferenceSpaceType::STAGE => &mut self.stage,
+                    ReferenceSpaceType::Local => &mut self.local,
+                    ReferenceSpaceType::Stage => &mut self.stage,
                     _ => unreachable!(),
                 };
 
@@ -64,25 +65,22 @@ impl ViewCache {
         }
     }
 
-    fn get_views_view_space(session: &SessionData, display_time: xr::Time) -> ViewDataViewSpace {
-        let (flags, mut views) = session
-            .session
+    fn get_views_view_space(session: &SessionData<DirectX11>, display_time: XrTime) -> ViewDataViewSpace {
+        let (mut views, flags) = session
             .locate_views(
-                xr::ViewConfigurationType::PRIMARY_STEREO,
                 display_time,
-                session.get_space_from_type(xr::ReferenceSpaceType::VIEW),
-            )
-            .expect("Couldn't locate views");
+                ViewConfigurationType::PrimaryStereo,
+            );
 
         let original_orientations = views
             .iter_mut()
             .map(
-                |xr::View {
-                     pose: xr::Posef { orientation: o, .. },
+                |View {
+                     pose: XrPosef { orientation: o, .. },
                      ..
                  }| {
                     let ret = Quat::from_xyzw(o.x, o.y, o.z, o.w).inverse();
-                    *o = xr::Quaternionf::IDENTITY; // parallel views
+                    *o = Quat::IDENTITY; // parallel views
                     ret
                 },
             )
@@ -95,30 +93,27 @@ impl ViewCache {
                 flags,
                 views: views
                     .try_into()
-                    .unwrap_or_else(|v: Vec<xr::View>| panic!("Expected 2 views, got {}", v.len())),
+                    .unwrap_or_else(|v: Vec<View>| panic!("Expected 2 views, got {}", v.len())),
             },
             original_orientations,
         }
     }
 
     fn get_views_other_space(
-        session: &SessionData,
-        display_time: xr::Time,
-        ty: xr::ReferenceSpaceType,
+        session: &SessionData<DirectX11>,
+        display_time: XrTime,
+        ty: ReferenceSpaceType,
         view_data_orientations_inverse: [Quat; 2],
     ) -> ViewData {
-        let (flags, mut views) = session
-            .session
+        let (mut views, flags) = session
             .locate_views(
-                xr::ViewConfigurationType::PRIMARY_STEREO,
                 display_time,
-                session.get_space_from_type(ty),
-            )
-            .expect("Couldn't locate views");
+                ViewConfigurationType::PrimaryStereo,
+            );
 
         for (
-            xr::View {
-                pose: xr::Posef {
+            View {
+                pose: XrPosef {
                     orientation: rot, ..
                 },
                 ..
@@ -130,7 +125,7 @@ impl ViewCache {
             // rotate the inverse of the view space view rotation by this space's
             // view orientation to remove the canting from the displays in this space
             let adjusted_rot = quat * view_rot;
-            *rot = xr::Quaternionf {
+            *rot = Quat {
                 x: adjusted_rot.x,
                 y: adjusted_rot.y,
                 z: adjusted_rot.z,
@@ -142,7 +137,7 @@ impl ViewCache {
             flags,
             views: views
                 .try_into()
-                .unwrap_or_else(|v: Vec<xr::View>| panic!("Expected 2 views, got {}", v.len())),
+                .unwrap_or_else(|v: Vec<View>| panic!("Expected 2 views, got {}", v.len())),
         }
     }
 }
@@ -151,7 +146,7 @@ impl ViewCache {
 #[interface = "IVRSystem"]
 #[versions(023, 022, 021, 020, 019, 017, 016, 015, 014, 012, 011, 009)]
 pub struct System {
-    openxr: Arc<RealOpenXrData>, // We don't need to test session restarting.
+    winlatorxr: Arc<RealOpenXrData>, // We don't need to test session restarting.
     input: Injected<Input<crate::compositor::Compositor>>,
     overlay: Injected<OverlayMan>,
     vtables: Vtables,
@@ -163,9 +158,9 @@ mod log_tags {
 }
 
 impl System {
-    pub fn new(openxr: Arc<RealOpenXrData>, injector: &Injector) -> Self {
+    pub fn new(winlatorxr: Arc<RealOpenXrData>, injector: &Injector) -> Self {
         Self {
-            openxr,
+            winlatorxr,
             input: injector.inject(),
             overlay: injector.inject(),
             vtables: Default::default(),
@@ -175,10 +170,10 @@ impl System {
 
     pub fn reset_views(&self) {
         std::mem::take(&mut *self.views.lock().unwrap());
-        let session = self.openxr.session_data.get();
-        let display_time = self.openxr.display_time.get();
+        let session = self.winlatorxr.session_data.get();
+        let display_time = self.winlatorxr.display_time.get();
         let mut views = self.views.lock().unwrap();
-        views.get_views(&session, display_time, xr::ReferenceSpaceType::VIEW);
+        views.get_views(&session, display_time, ReferenceSpaceType::View);
         views.get_views(
             &session,
             display_time,
@@ -186,11 +181,11 @@ impl System {
         );
     }
 
-    pub fn get_views(&self, ty: xr::ReferenceSpaceType) -> ViewData {
+    pub fn get_views(&self, ty: ReferenceSpaceType) -> ViewData {
         tracy_span!();
-        let session = self.openxr.session_data.get();
+        let session = self.winlatorxr.session_data.get();
         let mut views = self.views.lock().unwrap();
-        views.get_views(&session, self.openxr.display_time.get(), ty)
+        views.get_views(&session, self.winlatorxr.display_time.get(), ty)
     }
 }
 
@@ -200,7 +195,7 @@ impl vr::IVRSystem023_Interface for System {
             .openxr
             .instance
             .enumerate_view_configuration_views(
-                self.openxr.system_id,
+                self.winlatorxr.system_id,
                 xr::ViewConfigurationType::PRIMARY_STEREO,
             )
             .unwrap();
@@ -339,7 +334,7 @@ impl vr::IVRSystem023_Interface for System {
         duration_us: std::ffi::c_ushort,
     ) {
         self.input
-            .force(|_| Input::new(self.openxr.clone()))
+            .force(|_| Input::new(self.winlatorxr.clone()))
             .legacy_haptic(device_index, axis_id, duration_us);
     }
     fn GetControllerStateWithPose(
@@ -350,7 +345,7 @@ impl vr::IVRSystem023_Interface for System {
         state_size: u32,
         pose: *mut vr::TrackedDevicePose_t,
     ) -> bool {
-        let input = self.input.force(|_| Input::new(self.openxr.clone()));
+        let input = self.input.force(|_| Input::new(self.winlatorxr.clone()));
 
         let Some(hand) = input.device_index_to_hand(device_index) else {
             return false;
@@ -377,7 +372,7 @@ impl vr::IVRSystem023_Interface for System {
         state_size: u32,
     ) -> bool {
         self.input
-            .force(|_| Input::new(self.openxr.clone()))
+            .force(|_| Input::new(self.winlatorxr.clone()))
             .get_legacy_controller_state(device_index, state, state_size)
     }
     fn GetHiddenAreaMesh(
@@ -385,22 +380,22 @@ impl vr::IVRSystem023_Interface for System {
         eye: vr::EVREye,
         ty: vr::EHiddenAreaMeshType,
     ) -> vr::HiddenAreaMesh_t {
-        if !self.openxr.enabled_extensions.khr_visibility_mask {
+        if !self.winlatorxr.enabled_extensions.khr_visibility_mask {
             return Default::default();
         }
 
         debug!("GetHiddenAreaMesh: area mesh type: {ty:?}");
         let mask_ty = match ty {
-            vr::EHiddenAreaMeshType::Standard => xr::VisibilityMaskTypeKHR::HIDDEN_TRIANGLE_MESH,
-            vr::EHiddenAreaMeshType::Inverse => xr::VisibilityMaskTypeKHR::VISIBLE_TRIANGLE_MESH,
-            vr::EHiddenAreaMeshType::LineLoop => xr::VisibilityMaskTypeKHR::LINE_LOOP,
+            vr::EHiddenAreaMeshType::Standard => VisibilityMaskType::HiddenTriangleMesh,
+            vr::EHiddenAreaMeshType::Inverse => VisibilityMaskType::VisibleTriangleMesh,
+            vr::EHiddenAreaMeshType::LineLoop => VisibilityMaskType::LineLoop,
             vr::EHiddenAreaMeshType::Max => {
                 warn!("Unexpectedly got EHiddenAreaMeshType::Max - returning default area mesh");
                 return Default::default();
             }
         };
 
-        let session_data = self.openxr.session_data.get();
+        let session_data = self.winlatorxr.session_data.get();
         let mask = session_data
             .session
             .get_visibility_mask_khr(
@@ -677,10 +672,10 @@ impl vr::IVRSystem023_Interface for System {
 
         match prop {
             vr::ETrackedDeviceProperty::UserIpdMeters_Float => {
-                let views = self.get_views(xr::ReferenceSpaceType::VIEW).views;
+        let views = self.get_views(ReferenceSpaceType::View).views;
                 views[1].pose.position.x - views[0].pose.position.x
             }
-            vr::ETrackedDeviceProperty::DisplayFrequency_Float => self.openxr.get_refresh_rate(),
+            vr::ETrackedDeviceProperty::DisplayFrequency_Float => self.winlatorxr.get_refresh_rate(),
             _ => {
                 if let Some(error) = unsafe { error.as_mut() } {
                     *error = vr::ETrackedPropertyError::UnknownProperty;
@@ -787,10 +782,10 @@ impl vr::IVRSystem023_Interface for System {
         0
     }
     fn GetRawZeroPoseToStandingAbsoluteTrackingPose(&self) -> vr::HmdMatrix34_t {
-        xr::Posef::IDENTITY.into()
+        crate::winlatorxr::XrPosef::IDENTITY.into()
     }
     fn GetSeatedZeroPoseToStandingAbsoluteTrackingPose(&self) -> vr::HmdMatrix34_t {
-        xr::Posef::IDENTITY.into()
+        crate::winlatorxr::XrPosef::IDENTITY.into()
     }
     fn GetDeviceToAbsoluteTrackingPose(
         &self,
@@ -800,7 +795,7 @@ impl vr::IVRSystem023_Interface for System {
         pose_count: u32,
     ) {
         self.input
-            .force(|_| Input::new(self.openxr.clone()))
+            .force(|_| Input::new(self.winlatorxr.clone()))
             .get_poses(
                 unsafe { std::slice::from_raw_parts_mut(pose_array, pose_count as usize) },
                 Some(origin),
@@ -831,7 +826,7 @@ impl vr::IVRSystem023_Interface for System {
             *device = self
                 .openxr
                 .instance
-                .vulkan_graphics_device(self.openxr.system_id, instance as _)
+                .vulkan_graphics_device(self.winlatorxr.system_id, instance as _)
                 .expect("Failed to get vulkan physical device") as _;
         }
     }
@@ -845,7 +840,7 @@ impl vr::IVRSystem023_Interface for System {
 
 impl vr::IVRSystem021On022 for System {
     fn ResetSeatedZeroPose(&self) {
-        self.openxr
+        self.winlatorxr
             .reset_tracking_space(vr::ETrackingUniverseOrigin::Seated);
     }
 }
@@ -1011,7 +1006,7 @@ impl vr::IVRSystem009On011 for System {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{clientcore::Injector, openxr_data::OpenXrData};
+    use crate::{clientcore::Injector, winlatorxr::OpenXrData};
     use std::ffi::CStr;
     use vr::IVRSystem022_Interface;
 

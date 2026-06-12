@@ -5,7 +5,7 @@ use super::{
 use crate::button_mask_from_ids;
 use crate::input::legacy::{self, LegacyBindings, button_mask_from_id};
 use crate::input::profiles::{legal_paths, paths::*};
-use crate::openxr_data::Hand;
+use crate::winlatorxr::{Hand, ExtensionSet};
 use glam::Mat4;
 use openvr::EVRButtonId::{ApplicationMenu, Axis0, Axis1, Grip, System};
 
@@ -49,7 +49,7 @@ impl InteractionProfile for ViveWands {
     fn profile_path() -> &'static str {
         "/interaction_profiles/htc/vive_controller"
     }
-    fn has_required_extensions(_: &openxr::ExtensionSet) -> bool {
+    fn has_required_extensions(_: &ExtensionSet) -> bool {
         true
     }
     fn translate_path(path: DynInputPath) -> Option<DynInputPath> {
@@ -116,7 +116,7 @@ impl InteractionProfile for ViveWands {
 mod tests {
     use super::{InteractionProfile, ViveWands};
     use crate::input::tests::Fixture;
-    use openxr as xr;
+    use crate::winlatorxr as xr;
 
     #[test]
     fn verify_bindings() {

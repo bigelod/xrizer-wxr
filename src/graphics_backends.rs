@@ -1,20 +1,23 @@
-mod gl;
+mod directx11;
 mod vulkan;
 
 use derive_more::{From, TryInto};
-pub use gl::GlData;
 use openvr as vr;
-use openxr as xr;
+use crate::winlatorxr::*;
+pub use directx11::DirectX11Data;
+pub use directx11::DirectX11;
+pub use directx11::Extent2Di;
 pub use vulkan::VulkanData;
+pub use vulkan::Vulkan;
 
 pub trait GraphicsBackend: Into<SupportedBackend> {
-    type Api: xr::Graphics + 'static;
+    type Api: Graphics + 'static;
     type OpenVrTexture: Copy;
     type NiceFormat: std::fmt::Debug;
 
-    fn to_nice_format(format: <Self::Api as xr::Graphics>::Format) -> Self::NiceFormat;
+    fn to_nice_format(format: <Self::Api as Graphics>::Format) -> Self::NiceFormat;
 
-    fn session_create_info(&self) -> <Self::Api as xr::Graphics>::SessionCreateInfo;
+    fn session_create_info(&self) -> <Self::Api as Graphics>::SessionCreateInfo;
 
     /// Returns None if the texture is invalid.
     fn get_texture(texture: &vr::Texture_t) -> Option<Self::OpenVrTexture>;
@@ -24,12 +27,12 @@ pub trait GraphicsBackend: Into<SupportedBackend> {
         texture: Self::OpenVrTexture,
         bounds: vr::VRTextureBounds_t,
         color_space: vr::EColorSpace,
-    ) -> xr::SwapchainCreateInfo<Self::Api>;
+    ) -> SwapchainCreateInfo<Self::Api>;
 
     fn store_swapchain_images(
         &mut self,
-        images: Vec<<Self::Api as xr::Graphics>::SwapchainImage>,
-        format: <Self::Api as xr::Graphics>::Format,
+        images: Vec<<Self::Api as Graphics>::SwapchainImage>,
+        format: <Self::Api as Graphics>::Format,
     );
 
     fn copy_texture_to_swapchain(
@@ -40,22 +43,22 @@ pub trait GraphicsBackend: Into<SupportedBackend> {
         bounds: vr::VRTextureBounds_t,
         image_index: usize,
         submit_flags: vr::EVRSubmitFlags,
-    ) -> xr::Extent2Di;
+    ) -> Extent2Di;
 
     fn copy_overlay_to_swapchain(
         &mut self,
         texture: Self::OpenVrTexture,
         bounds: vr::VRTextureBounds_t,
         image_index: usize,
-    ) -> xr::Extent2Di;
+    ) -> Extent2Di;
 }
 
 #[derive(macros::Backends, TryInto, From)]
 #[try_into(owned, ref)]
 #[allow(clippy::large_enum_variant)]
 pub enum SupportedBackend {
+    DirectX11(DirectX11Data),
     Vulkan(VulkanData),
-    OpenGL(GlData),
     #[cfg(test)]
     Fake(crate::compositor::FakeGraphicsData),
 }
@@ -110,7 +113,7 @@ pub trait WithAnyGraphicsOwned<G>: WithAnyGraphicsParams {
 impl SupportedBackend {
     pub fn is_texture_type_supported(texture_type: vr::ETextureType) -> bool {
         match texture_type {
-            vr::ETextureType::Vulkan | vr::ETextureType::OpenGL => true,
+            vr::ETextureType::Vulkan | vr::ETextureType::D3D11 => true,
             #[cfg(test)]
             vr::ETextureType::Reserved => true,
             _ => false,
@@ -123,7 +126,9 @@ impl SupportedBackend {
                 let vk_texture = unsafe { &*(texture.handle as *const vr::VRVulkanTextureData_t) };
                 Some(Self::Vulkan(VulkanData::new(vk_texture)))
             }
-            vr::ETextureType::OpenGL => GlData::new().map(Self::OpenGL),
+            vr::ETextureType::D3D11 => {
+                DirectX11Data::new().ok().map(Self::DirectX11)
+            }
             #[cfg(test)]
             vr::ETextureType::Reserved => Some(Self::Fake(
                 crate::compositor::FakeGraphicsData::new(texture),
@@ -131,4 +136,19 @@ impl SupportedBackend {
             other => panic!("Unsupported texture type: {other:?}"),
         }
     }
+}
+
+pub fn select_preferred_backend() -> Option<SupportedBackend> {
+    if let Ok(dx11) = DirectX11Data::new() {
+        log::info!("Using DirectX 11 backend");
+        return Some(SupportedBackend::DirectX11(dx11));
+    }
+
+    if let Ok(vulkan) = VulkanData::new_temporary(&crate::winlatorxr::Instance::new().ok()?, crate::winlatorxr::SystemId(0)) {
+        log::info!("Using Vulkan backend (DirectX 11 unavailable)");
+        return Some(SupportedBackend::Vulkan(vulkan));
+    }
+
+    log::error!("No suitable graphics backend found");
+    None
 }

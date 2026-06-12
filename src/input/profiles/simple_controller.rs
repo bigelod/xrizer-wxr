@@ -4,7 +4,7 @@ use super::{
 };
 use crate::button_mask_from_ids;
 use crate::input::legacy::{Bindings, LegacyBindings, button_mask_from_id};
-use crate::openxr_data::Hand;
+use crate::winlatorxr::{Hand, ExtensionSet};
 use glam::Mat4;
 use openvr::EVRButtonId as btn;
 
@@ -42,7 +42,7 @@ impl InteractionProfile for SimpleController {
     fn profile_path() -> &'static str {
         "/interaction_profiles/khr/simple_controller"
     }
-    fn has_required_extensions(_: &openxr::ExtensionSet) -> bool {
+    fn has_required_extensions(_: &ExtensionSet) -> bool {
         true
     }
     fn translate_path(path: DynInputPath) -> Option<DynInputPath> {
@@ -97,7 +97,7 @@ mod tests {
 
     use super::{InteractionProfile, SimpleController};
     use crate::input::tests::{ActionType, Fixture};
-    use openxr as xr;
+    use crate::winlatorxr as xr;
 
     impl Fixture {
         fn verify_no_bindings<T: ActionType>(&self, interaction_profile: &str, action_name: &CStr) {

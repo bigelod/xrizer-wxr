@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use glam::Mat4;
 use openvr as vr;
-use openxr as xr;
+use crate::winlatorxr as xr;
 
 use crate::input::profiles::knuckles::Knuckles;
 #[cfg(feature = "monado")]
@@ -14,7 +14,7 @@ use crate::input::profiles::vive_tracker::ViveTracker;
 use openxr_mndx_xdev_space::{SessionXDevExtensionMNDX, XDev, XR_MNDX_XDEV_SPACE_EXTENSION_NAME};
 
 use crate::input::profiles::ProfileProperties;
-use crate::openxr_data::{self, Hand, OpenXrData, SessionData};
+use crate::winlatorxr::{self, Hand, OpenXrData, SessionData};
 use crate::tracy_span;
 use log::trace;
 
@@ -84,8 +84,8 @@ pub struct TrackedDevice {
 }
 
 fn get_hmd_pose(
-    xr_data: &OpenXrData<impl crate::openxr_data::Compositor>,
-    session_data: &SessionData,
+    xr_data: &OpenXrData<impl crate::winlatorxr::Compositor>,
+    session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
     origin: vr::ETrackingUniverseOrigin,
 ) -> Option<vr::TrackedDevicePose_t> {
     let (location, velocity) = {
@@ -102,10 +102,11 @@ fn get_hmd_pose(
 }
 
 fn get_controller_pose(
-    xr_data: &OpenXrData<impl crate::openxr_data::Compositor>,
-    session_data: &SessionData,
+    xr_data: &OpenXrData<impl crate::winlatorxr::Compositor>,
+    session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
     controller: &TrackedDevice,
     origin: vr::ETrackingUniverseOrigin,
+    hand: Hand,
 ) -> Option<vr::TrackedDevicePose_t> {
     let pose_data = session_data.input_data.pose_data.get()?;
 
@@ -132,7 +133,7 @@ fn get_controller_pose(
 
 #[cfg(feature = "monado")]
 fn get_generic_tracker_pose(
-    xr_data: &OpenXrData<impl crate::openxr_data::Compositor>,
+    xr_data: &OpenXrData<impl crate::winlatorxr::Compositor>,
     session_data: &SessionData,
     tracker: &TrackedDevice,
     origin: vr::ETrackingUniverseOrigin,
@@ -169,8 +170,8 @@ impl TrackedDevice {
 
     pub fn get_pose(
         &self,
-        xr_data: &OpenXrData<impl crate::openxr_data::Compositor>,
-        session_data: &SessionData,
+        xr_data: &OpenXrData<impl crate::winlatorxr::Compositor>,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         origin: vr::ETrackingUniverseOrigin,
     ) -> Option<vr::TrackedDevicePose_t> {
         let mut pose_cache = self.pose_cache.lock().unwrap();
@@ -194,7 +195,7 @@ impl TrackedDevice {
 
     pub fn get_hand_skeleton(
         &self,
-        xr_data: &OpenXrData<impl crate::openxr_data::Compositor>,
+        xr_data: &OpenXrData<impl crate::winlatorxr::Compositor>,
         base: &xr::Space,
     ) -> Option<xr::HandJointLocations> {
         let TrackedDeviceType::Controller {
@@ -403,7 +404,7 @@ impl TrackedDeviceList {
     #[cfg(feature = "monado")]
     pub(super) fn create_monado_generic_trackers(
         &mut self,
-        xr_data: &OpenXrData<impl crate::openxr_data::Compositor>,
+        xr_data: &OpenXrData<impl crate::winlatorxr::Compositor>,
         session_data: &SessionData,
     ) -> xr::Result<()> {
         if !xr_data
@@ -467,7 +468,7 @@ impl TrackedDeviceList {
     }
 }
 
-impl<C: openxr_data::Compositor> Input<C> {
+impl<C: crate::winlatorxr::Compositor> Input<C> {
     pub fn get_poses(
         &self,
         poses: &mut [vr::TrackedDevicePose_t],

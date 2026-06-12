@@ -1,3 +1,22 @@
+# xrizer-WXR - Run OpenVR games on WinlatorXR
+
+This is a modification of the xrizer project to convert it from "OpenVR -> OpenXR" to instead support "OpenVR -> WinlatorXR XrAPI" translation, for attempting to run these PCVR experiences directly within a x86/Wine/Proton based container on Android (Quest / Pico) standalone devices
+
+This modification was created with the help of OpenCode, Visual Studio Code, and the Z.AI Coding Plan (GLM-4.7) and includes the full AI instructions and documentation in /docs
+
+1. IMPLEMENTATION_PLAN.md -> The overall guide of this project specifically (created with AI assistance / PLAN mode)
+2. WINLATORXR_INTEGRATION.md -> WinlatorXR specific information for the AI to understand it (hand made)
+3. PROTOCOL.md -> The WinlatorXR XrAPI UDP traffic data (input and output) explained (hand made)
+4. TASK_BREAKDOWN.md -> The step-by-step breakdown of the work to be done (created with AI assistance / PLAN mode)
+5. PROGRESS_PLAN.md -> The current overall progress of the project (created by AI)
+6. CONTINUED_DEVELOPMENT.md -> The most recent status of the project, so that an agent can continue from where a previous one had finished if there is a sudden connection or power loss, or a token limit has been hit (created by AI)
+
+The project is still a total work in progress and is a bit of a testbed for using AI assisted coding for WinlatorXR conversions, it is not intended to be representative of other XrAPI works hand-made for WinlatorXR, nor does it reflect the quality of the original project it is based upon for OpenVR to OpenXR conversions.
+
+Please do not bother any developers of the original xrizer project with requests or questions related to this derivative work.
+
+# Original xrizer ReadMe:
+
 # xrizer - XR-ize your OpenVR games
 
 xrizer is a reimplementation of OpenVR on top of OpenXR. This enables you to run OpenVR games through any OpenXR runtime without running SteamVR.

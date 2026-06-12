@@ -5,7 +5,8 @@ use super::{
 use crate::button_mask_from_ids;
 use crate::input::legacy::{self, LegacyBindings, button_mask_from_id};
 use crate::input::profiles::InputToXrPath;
-use crate::openxr_data::Hand;
+use crate::winlatorxr::{Hand, ExtensionSet, ActionTy, HapticTy};
+use crate::winlatorxr as winlatorxr;
 use glam::{EulerRot, Mat4, Quat, Vec3};
 
 pub struct OculusTouch;
@@ -62,7 +63,7 @@ impl InteractionProfile for OculusTouch {
     fn profile_path() -> &'static str {
         "/interaction_profiles/oculus/touch_controller"
     }
-    fn has_required_extensions(_: &openxr::ExtensionSet) -> bool {
+    fn has_required_extensions(_: &winlatorxr::ExtensionSet) -> bool {
         true
     }
 
@@ -139,7 +140,7 @@ impl InteractionProfile for OculusTouch {
 mod tests {
     use super::{InteractionProfile, OculusTouch};
     use crate::input::tests::Fixture;
-    use openxr as xr;
+    use crate::winlatorxr as xr;
 
     #[test]
     fn verify_bindings() {

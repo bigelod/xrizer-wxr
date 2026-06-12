@@ -1,10 +1,9 @@
 #![allow(private_interfaces)]
 
 use super::bindings::ActionPath;
-use crate::openxr_data::Hand;
+use crate::winlatorxr::Hand;
 use log::{error, trace, warn};
 use openvr as vr;
-use openxr as xr;
 use serde::{
     Deserialize,
     de::{Error, Unexpected},
@@ -103,10 +102,10 @@ pub struct Localization {
 }
 
 fn create_action_set(
-    instance: &xr::Instance,
+    instance: &crate::winlatorxr::Instance,
     path: &str,
     localized: Option<&str>,
-) -> Result<xr::ActionSet, vr::EVRInputError> {
+) -> Result<crate::winlatorxr::ActionSet, vr::EVRInputError> {
     // OpenXR does not like the "/actions/<set name>" format, so we need to strip the prefix
     let Some(xr_friendly_name) = path.strip_prefix("/actions/") else {
         error!("Action set {path} missing actions prefix.");
@@ -123,10 +122,10 @@ fn create_action_set(
 }
 
 pub fn load_action_sets(
-    instance: &xr::Instance,
+    instance: &crate::winlatorxr::Instance,
     english: Option<&Localization>,
     sets: Vec<ActionSetJson>,
-) -> Result<HashMap<String, xr::ActionSet>, vr::EVRInputError> {
+) -> Result<HashMap<String, crate::winlatorxr::ActionSet>, vr::EVRInputError> {
     let mut action_sets = HashMap::new();
     for ActionSetJson { path } in sets {
         let localized = english.and_then(|e| e.localized_names.get(&path));
@@ -138,36 +137,36 @@ pub fn load_action_sets(
     Ok(action_sets)
 }
 
-fn create_action<T: xr::ActionTy>(
-    instance: &xr::Instance,
+fn create_action<T: crate::winlatorxr::ActionTy>(
+    instance: &crate::winlatorxr::Instance,
     data: &ActionDataCommon,
-    sets: &mut HashMap<String, xr::ActionSet>,
+    sets: &mut HashMap<String, crate::winlatorxr::ActionSet>,
     english: Option<&Localization>,
-    paths: &[xr::Path],
+    paths: &[crate::winlatorxr::Path],
     long_name_idx: &mut usize,
-) -> xr::Result<xr::Action<T>> {
+) -> Result<crate::winlatorxr::Action<T>, vr::EVRInputError> {
     let localized = english
         .and_then(|e| e.localized_names.get(&data.name.path))
         .map(|s| s.as_str());
 
     let set_name = data.name.action_set_name();
     let entry;
-    let set = if let Some(set) = sets.get(set_name) {
+            let set = if let Some(set) = sets.get(set_name) {
         set
     } else {
         warn!("Action set {set_name} is missing from manifest, creating it...");
         let set = create_action_set(instance, set_name, None).map_err(|e| {
             error!("Creating implicit action set failed: {e:?}");
-            xr::sys::Result::ERROR_INITIALIZATION_FAILED
+            vr::EVRInputError::VRInputError_NameInvalid
         })?;
         entry = sets.entry(set_name.to_string()).insert_entry(set);
         entry.get()
     };
     let mut xr_friendly_name = data.name.cleaned_name();
-    if xr_friendly_name.len() + 1 > xr::sys::MAX_ACTION_NAME_SIZE {
+    if xr_friendly_name.len() + 1 > 256 {
         let idx_str = ["_ln", &long_name_idx.to_string()].concat();
         xr_friendly_name.replace_range(
-            xr::sys::MAX_ACTION_NAME_SIZE - idx_str.len() - 1..,
+            256 - idx_str.len() - 1..,
             &idx_str,
         );
         *long_name_idx += 1;
@@ -178,7 +177,7 @@ fn create_action<T: xr::ActionTy>(
     set.create_action(&xr_friendly_name, localized, paths)
         .or_else(|err| {
             // If we get a duplicated localized name, just deduplicate it and try again
-            if err == xr::sys::Result::ERROR_LOCALIZED_NAME_DUPLICATED {
+            if err == vr::EVRInputError::VRInputError_NameInvalid {
                 // Action names are inherently unique, so just throw it at the end of the
                 // localized name to make it a unique
                 let localized = format!("{localized} ({xr_friendly_name})");
@@ -191,12 +190,12 @@ fn create_action<T: xr::ActionTy>(
 
 pub type LoadedActionDataMap = HashMap<String, crate::input::ActionData>;
 pub fn load_actions(
-    instance: &xr::Instance,
+    instance: &crate::winlatorxr::Instance,
     english: Option<&Localization>,
-    sets: &mut HashMap<String, xr::ActionSet>,
+    sets: &mut HashMap<String, crate::winlatorxr::ActionSet>,
     actions: Vec<ActionType>,
-    left_hand: xr::Path,
-    right_hand: xr::Path,
+    left_hand: crate::winlatorxr::Path,
+    right_hand: crate::winlatorxr::Path,
 ) -> Result<LoadedActionDataMap, vr::EVRInputError> {
     let mut ret = HashMap::with_capacity(actions.len());
     let mut long_name_idx = 0;
@@ -221,7 +220,7 @@ pub fn load_actions(
             ActionType::Vector2(data) => (
                 &data.name,
                 Vector2 {
-                    action: create_action!(xr::Vector2f, data),
+                    action: create_action!(crate::winlatorxr::XrVector2f, data),
                     last_value: Default::default(),
                 },
             ),
@@ -237,7 +236,7 @@ pub fn load_actions(
                 trace!("Creating skeleton action {}", data.name.path);
                 (&data.name, Skeleton(*skeleton))
             }
-            ActionType::Vibration(data) => (&data.name, Haptic(create_action!(xr::Haptic, data))),
+            ActionType::Vibration(data) => (&data.name, Haptic(create_action!(crate::winlatorxr::HapticTy, data))),
         };
         ret.insert(path.path.clone(), action);
     }

@@ -12,7 +12,7 @@ use crate::{
 };
 use fakexr::UserPath::*;
 use glam::{Mat4, Quat};
-use openxr as xr;
+use crate::winlatorxr as xr;
 use slotmap::KeyData;
 use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_4;

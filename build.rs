@@ -1,40 +1,48 @@
-use anyhow::anyhow;
-use std::env;
-use vergen_gitcl::{Emitter, GitclBuilder};
+fn main() {
+    // Minimal build script for WinlatorXR — no shaders, no git version
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
 
-fn main() -> Result<(), anyhow::Error> {
-    let out_dir = env::var("OUT_DIR").unwrap();
-    for path in shaders::compile(&out_dir) {
-        println!("cargo::rerun-if-changed={}", path.to_str().unwrap());
-    }
-
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let target_os = target_os.as_str();
-
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    let target_arch = target_arch.as_str();
-
-    // Object name and platform directory logic is generally based on a couple of pieces of openvr_api code:
-    //  - platform directory names: https://github.com/ValveSoftware/openvr/blob/ae46a8dd0172580648c8922658a100439115d3eb/src/vrcore/pathtools_public.h#L127-L157
-    //  - general logic and special cases: https://github.com/ValveSoftware/openvr/blob/ae46a8dd0172580648c8922658a100439115d3eb/src/openvr_api_public.cpp#L128-L144
-    // The android and macos platforms have been omitted, since we are currently uninterested in supporting them.
-
-    let vrclient_name = match (target_os, target_arch) {
+    let vrclient_name = match (target_os.as_str(), target_arch.as_str()) {
         ("windows", "x86_64") => "vrclient_x64",
         _ => "vrclient",
     };
 
-    let platform_location = match (target_os, target_arch) {
+    let platform_location = match (target_os.as_str(), target_arch.as_str()) {
         ("windows", "x86") | ("windows", "x86_64") => "bin/",
         ("linux", "x86") => "bin/",
         ("linux", "x86_64") => "bin/linux64/",
         ("linux", "aarch64") => "bin/linuxarm64/",
-        _ => return Err(anyhow!("Unsupported platform: {target_os}/{target_arch}")),
+        _ => "bin/",
     };
 
-    println!("cargo::rustc-env=XRIZER_OPENVR_PLATFORM_DIR={platform_location}");
-    println!("cargo::rustc-env=XRIZER_OPENVR_VRCLIENT_NAME={vrclient_name}");
+    println!("cargo:rustc-env=XRIZER_OPENVR_PLATFORM_DIR={platform_location}");
+    println!("cargo:rustc-env=XRIZER_OPENVR_VRCLIENT_NAME={vrclient_name}");
 
-    let builder = GitclBuilder::default().describe(true, true, None).build()?;
-    Emitter::default().add_instructions(&builder)?.emit()
+    // Provide fallback for VERGEN_GIT_DESCRIBE
+    let version = if let Ok(describe) = std::process::Command::new("git")
+        .args(["describe", "--always", "--dirty"])
+        .output()
+    {
+        if describe.status.success() {
+            String::from_utf8_lossy(&describe.stdout).trim().to_string()
+        } else {
+            env!("CARGO_PKG_VERSION").to_string()
+        }
+    } else {
+        env!("CARGO_PKG_VERSION").to_string()
+    };
+    println!("cargo:rustc-env=VERGEN_GIT_DESCRIBE={version}");
+
+    // On Windows, we don't need shaders since we're using WinlatorXR's XrAPI
+    // Instead, we'll create empty stub shader files to satisfy the build
+    if target_os == "windows" {
+        let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+
+        std::fs::write(out_dir.join("vert_overlay.spv"), &[]).unwrap();
+        std::fs::write(out_dir.join("frag_overlay.spv"), &[]).unwrap();
+
+        println!("cargo:rustc-link-lib=d3d11");
+        println!("cargo:rustc-link-lib=dxgi");
+    }
 }

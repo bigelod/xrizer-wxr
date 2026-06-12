@@ -2,21 +2,21 @@
 mod generated;
 
 use super::Input;
-use crate::openxr_data::{self, Hand, SessionData};
+use crate::winlatorxr::{self, Hand, SessionData};
 use HandSkeletonBone::*;
 use glam::{Affine3A, Quat, Vec3};
 use log::debug;
 use openvr as vr;
-use openxr::{self as xr};
+use crate::winlatorxr as xr;
 use paste::paste;
 use std::cell::RefCell;
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Instant;
 
-impl<C: openxr_data::Compositor> Input<C> {
+impl<C: crate::winlatorxr::Compositor> Input<C> {
     pub(super) fn get_bones_from_hand_tracking(
         &self,
-        session_data: &SessionData,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         space: vr::EVRSkeletalTransformSpace,
         hand: Hand,
         transforms: &mut [vr::VRBoneTransform_t],
@@ -91,7 +91,7 @@ impl<C: openxr_data::Compositor> Input<C> {
 
         // The wrists appear to have to some sort of strange orientation compared
         // to the other joints - this rotation fixes it up
-        joints[xr::HandJoint::WRIST] *= Affine3A::from_quat(Quat::from_euler(
+        joints[xr::HandJoint::Wrist] *= Affine3A::from_quat(Quat::from_euler(
             glam::EulerRot::YZXEx,
             -FRAC_PI_2,
             FRAC_PI_2,
@@ -103,7 +103,7 @@ impl<C: openxr_data::Compositor> Input<C> {
         // For each finger, the metacarpal is a child of the wrist, and then each consecutive
         // joint in that finger is a parent->child relationship.
         // https://github.com/ValveSoftware/openvr/wiki/Hand-Skeleton#bone-structure
-        let parent_id = RefCell::new(xr::HandJoint::WRIST);
+        let parent_id = RefCell::new(xr::HandJoint::Wrist);
         let mut parented_joints = joints.clone();
         let mut localize = |joint: xr::HandJoint| {
             let mut parent_id = parent_id.borrow_mut();
@@ -115,7 +115,7 @@ impl<C: openxr_data::Compositor> Input<C> {
             for (joint, _) in joint_list.iter().copied() {
                 localize(joint);
             }
-            *parent_id.borrow_mut() = xr::HandJoint::WRIST;
+            *parent_id.borrow_mut() = xr::HandJoint::Wrist;
         }
 
         joints = parented_joints;
@@ -129,13 +129,13 @@ impl<C: openxr_data::Compositor> Input<C> {
         // Currently as is, the hands will point down
         // This rotation corrects them so they are pointing the correct direction
         // Note that it is hand specific.
-        joints[xr::HandJoint::WRIST] *= match hand {
+        joints[xr::HandJoint::Wrist] *= match hand {
             Hand::Left => {
                 Affine3A::from_quat(Quat::from_euler(glam::EulerRot::YZXEx, FRAC_PI_2, PI, 0.0))
             }
             Hand::Right => Affine3A::from_rotation_y(-FRAC_PI_2),
         };
-        transforms[Wrist as usize] = joints[xr::HandJoint::WRIST].into();
+        transforms[Wrist as usize] = joints[xr::HandJoint::Wrist].into();
 
         for (joint, bone) in JOINTS_TO_BONES[1..]
             .iter()
@@ -164,7 +164,7 @@ impl<C: openxr_data::Compositor> Input<C> {
 
     pub(super) fn get_bone_summary_from_hand_tracking(
         &self,
-        session_data: &SessionData,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         summary_type: vr::EVRSummaryType,
         summary_data: &mut vr::VRSkeletalSummaryData_t,
         hand: Hand,
@@ -280,7 +280,7 @@ impl<C: openxr_data::Compositor> Input<C> {
 
     pub(super) fn get_estimated_bones(
         &self,
-        session_data: &SessionData,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         space: vr::EVRSkeletalTransformSpace,
         hand: Hand,
         transforms: &mut [vr::VRBoneTransform_t],
@@ -327,7 +327,7 @@ impl<C: openxr_data::Compositor> Input<C> {
 
     pub(super) fn get_estimated_bone_summary(
         &self,
-        session_data: &SessionData,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         _: vr::EVRSummaryType,
         summary_data: &mut vr::VRSkeletalSummaryData_t,
         hand: Hand,
@@ -346,7 +346,7 @@ impl<C: openxr_data::Compositor> Input<C> {
         };
     }
 
-    fn get_finger_state(&self, session_data: &SessionData, hand: Hand) -> FingerState {
+    fn get_finger_state(&self, session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>, hand: Hand) -> FingerState {
         // Determines the speed at which fingers follow the input states
         // This value seems to feel right for both analog inputs and binary ones (like vive wands)
         const FINGER_SMOOTHING_SPEED: f32 = 24.0;
@@ -546,7 +546,7 @@ macro_rules! joints_for_finger {
 }
 
 static JOINTS_TO_BONES: &[&[(xr::HandJoint, HandSkeletonBone)]] = &[
-    [(xr::HandJoint::WRIST, Wrist)].as_slice(),
+    [(xr::HandJoint::Wrist, Wrist)].as_slice(),
     &[
         (xr::HandJoint::THUMB_METACARPAL, Thumb0),
         (xr::HandJoint::THUMB_PROXIMAL, Thumb1),

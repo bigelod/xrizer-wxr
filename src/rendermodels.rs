@@ -12,7 +12,6 @@ use log::{debug, warn};
 use lz4_flex::frame::FrameDecoder;
 use obj::{IndexTuple, ObjData};
 use openvr as vr;
-use openxr as xr;
 
 // all render models will use this color
 const RENDER_MODEL_COLOR: [u8; 4] = [32, 32, 32, 255];
@@ -218,8 +217,8 @@ impl vr::IVRRenderModels006_Interface for RenderModels {
 
         // all of our models are static and have offsets baked in
         unsafe {
-            (*state).mTrackingToComponentRenderModel = xr::Posef::IDENTITY.into();
-            (*state).mTrackingToComponentLocal = xr::Posef::IDENTITY.into();
+            (*state).mTrackingToComponentRenderModel = crate::winlatorxr::XrPosef::IDENTITY.into();
+            (*state).mTrackingToComponentLocal = crate::winlatorxr::XrPosef::IDENTITY.into();
             (*state).uProperties =
                 (vr::EVRComponentProperty::IsVisible | vr::EVRComponentProperty::IsStatic).0;
         }

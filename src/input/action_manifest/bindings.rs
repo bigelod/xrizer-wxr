@@ -13,10 +13,10 @@ use crate::{
             ThresholdBindingFloat, ThresholdBindingVector2, ToggleData,
         },
     },
-    openxr_data::Hand,
+    winlatorxr::Hand,
 };
 use log::{debug, trace, warn};
-use openxr as xr;
+use crate::winlatorxr as xr;
 use serde::de::value::StringDeserializer;
 use serde::{
     Deserialize,
@@ -25,6 +25,8 @@ use serde::{
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::str::FromStr;
+
+pub type Vector2f = crate::winlatorxr::XrVector2f;
 
 /**
  * Structure for binding files
@@ -433,10 +435,10 @@ struct Vector2Parameters {
 }
 
 pub fn handle_dpad_binding(
-    string_to_path: impl Fn(&str) -> Option<xr::Path>,
+    string_to_path: impl Fn(&str) -> Option<crate::winlatorxr::Path>,
     parent_path: DynInputPath,
     action_set_name: &str,
-    action_set: &xr::ActionSet,
+    action_set: &crate::winlatorxr::ActionSet,
     context: &mut BindingsProfileLoadContext,
     DpadInput {
         east,

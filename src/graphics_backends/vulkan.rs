@@ -2,10 +2,13 @@ use super::GraphicsBackend;
 use ash::vk::{self, Handle};
 use log::warn;
 use openvr as vr;
-use openxr as xr;
+use crate::winlatorxr::*;
 use std::collections::HashSet;
 use std::ffi::{CString, c_char};
 use std::sync::{LazyLock, Mutex};
+use crate::graphics_backends::Extent2Di;
+
+pub struct Vulkan;
 
 struct RealSessionData {
     images: Vec<vk::Image>,
@@ -52,16 +55,16 @@ impl Drop for VulkanData {
 }
 
 impl GraphicsBackend for VulkanData {
-    type Api = xr::Vulkan;
+    type Api = Vulkan;
     type OpenVrTexture = *const vr::VRVulkanTextureData_t;
     type NiceFormat = vk::Format;
 
     #[inline]
-    fn to_nice_format(format: u32) -> Self::NiceFormat {
+    fn to_nice_format(format: u64) -> Self::NiceFormat {
         vk::Format::from_raw(format as _)
     }
 
-    fn session_create_info(&self) -> <Self::Api as openxr::Graphics>::SessionCreateInfo {
+    fn session_create_info(&self) -> <Self::Api as Graphics>::SessionCreateInfo {
         let queue_families = unsafe {
             self.instance
                 .get_physical_device_queue_family_properties(self.physical_device)
@@ -79,7 +82,7 @@ impl GraphicsBackend for VulkanData {
                 )
             });
 
-        xr::vulkan::SessionCreateInfo {
+        VulkanSessionCreateInfo {
             instance: self.instance.handle().as_raw() as _,
             physical_device: self.physical_device.as_raw() as _,
             device: self.device.handle().as_raw() as _,
@@ -95,7 +98,7 @@ impl GraphicsBackend for VulkanData {
             None
         }
     }
-    fn store_swapchain_images(&mut self, images: Vec<u64>, format: u32) {
+    fn store_swapchain_images(&mut self, images: Vec<SwapchainImageVulkanKHR>, format: u64) {
         let images: Vec<vk::Image> = images.into_iter().map(vk::Image::from_raw).collect();
         let pool = unsafe {
             self.device
@@ -137,13 +140,13 @@ impl GraphicsBackend for VulkanData {
         texture: *const vr::VRVulkanTextureData_t,
         bounds: vr::VRTextureBounds_t,
         color_space: vr::EColorSpace,
-    ) -> xr::SwapchainCreateInfo<Self::Api> {
+    ) -> SwapchainCreateInfo<Self::Api> {
         let texture = unsafe { texture.as_ref() }.unwrap();
         let (extent, _) = texture_extent_from_bounds(texture, bounds);
-        xr::SwapchainCreateInfo {
-            create_flags: xr::SwapchainCreateFlags::EMPTY,
-            usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT
-                | xr::SwapchainUsageFlags::TRANSFER_DST,
+        SwapchainCreateInfo {
+            create_flags: SwapchainCreateFlags::EMPTY,
+            usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT
+                | SwapchainUsageFlags::TRANSFER_DST,
             format: get_colorspace_corrected_format(
                 vk::Format::from_raw(texture.m_nFormat as _),
                 color_space,
@@ -166,7 +169,7 @@ impl GraphicsBackend for VulkanData {
         bounds: vr::VRTextureBounds_t,
         image_index: usize,
         submit_flags: vr::EVRSubmitFlags,
-    ) -> xr::Extent2Di {
+    ) -> Extent2Di {
         let (texture, array_data) =
             if (submit_flags & vr::EVRSubmitFlags::VulkanTextureWithArrayData).0 > 0 {
                 let data = unsafe { &*texture.cast::<vr::VRVulkanTextureArrayData_t>() };
@@ -305,9 +308,9 @@ impl GraphicsBackend for VulkanData {
             );
         });
 
-        xr::Extent2Di {
-            width: extent.width as _,
-            height: extent.height as _,
+        Extent2Di {
+            width: extent.width as i32,
+            height: extent.height as i32,
         }
     }
 
@@ -316,7 +319,7 @@ impl GraphicsBackend for VulkanData {
         texture: *const vr::VRVulkanTextureData_t,
         bounds: vr::VRTextureBounds_t,
         image_index: usize,
-    ) -> xr::Extent2Di {
+    ) -> Extent2Di {
         let mut data = self.real_data.as_ref().unwrap();
         let buf = data.bufs[image_index];
         let texture = unsafe { texture.as_ref() }.unwrap();
@@ -455,7 +458,7 @@ impl GraphicsBackend for VulkanData {
             self.device.destroy_image_view(game_view, None);
         }
 
-        xr::Extent2Di {
+        XrExtent2Df {
             width: extent.width as _,
             height: extent.height as _,
         }
@@ -514,7 +517,7 @@ impl VulkanData {
         }
     }
 
-    pub fn new_temporary(xr_instance: &xr::Instance, system_id: xr::SystemId) -> Self {
+    pub fn new_temporary(xr_instance: &Instance, system_id: SystemId) -> Self {
         let entry = new_entry();
 
         let inst_exts = xr_instance
@@ -909,4 +912,11 @@ fn new_entry() -> ash::Entry {
             get_instance_proc_addr: fakexr::vulkan::get_instance_proc_addr,
         })
     }
+}
+
+impl crate::winlatorxr::Graphics for Vulkan {
+    type SessionCreateInfo = crate::winlatorxr::VulkanSessionCreateInfo;
+    type Format = u64;
+    type SwapchainImage = crate::winlatorxr::SwapchainImageVulkanKHR;
+    type SwapchainCreateInfo = crate::winlatorxr::VulkanSwapchainCreateInfoKHR;
 }

@@ -1,17 +1,18 @@
 use super::action_manifest::{ClickThresholdParams, GrabParameters};
 use crate::AtomicF32;
+use crate::graphics_backends::DirectX11;
 use crate::input::{ActionData, ExtraActionData};
-use crate::openxr_data::SessionData;
+use crate::winlatorxr::SessionData;
 use log::error;
-use openxr as xr;
+use crate::winlatorxr as xr;
 use std::f32::consts::{FRAC_PI_4, PI};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use xr::{Haptic, HapticVibration};
+use xr::HapticVibration;
 
 mod marker {
-    use openxr as xr;
+    use crate::winlatorxr as xr;
 
     pub trait ActionsMarker {
         type T<U: xr::ActionTy>;
@@ -116,7 +117,7 @@ pub(super) trait BoolCustomBinding: Sized {
         actions: &Self::ExtraActions<Actions>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>>;
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -187,14 +188,14 @@ impl BoolCustomBinding for DpadData {
         _: &(),
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>> {
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let action = &self.actions;
         let parent_state = action.xy.state(session, subaction_path)?;
         let mut ret_state = xr::ActionState {
             current_state: false,
             last_change_time: parent_state.last_change_time, // TODO: this is wrong
             changed_since_last_sync: false,
-            is_active: parent_state.is_active,
+            active: parent_state.is_active(),
         };
 
         let last_active = self.last_state.load(Ordering::Relaxed);
@@ -391,7 +392,7 @@ impl BoolCustomBinding for GrabBindingData {
         grabs: &Self::ExtraActions<Actions>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>> {
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let force_state = grabs.force_action.state(session, subaction_path)?;
         let value_state = grabs.value_action.state(session, subaction_path)?;
         if !force_state.is_active || !value_state.is_active {
@@ -415,7 +416,7 @@ impl BoolCustomBinding for GrabBindingData {
                 current_state: grabbed,
                 changed_since_last_sync,
                 last_change_time: force_state.last_change_time,
-                is_active: true,
+                active: true,
             }))
         }
     }
@@ -463,7 +464,7 @@ impl BoolCustomBinding for ToggleData {
         action: &xr::Action<bool>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>> {
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let state = action.state(session, subaction_path)?;
         if !state.is_active {
             return Ok(None);
@@ -490,7 +491,7 @@ impl BoolCustomBinding for ToggleData {
             current_state,
             changed_since_last_sync,
             last_change_time: state.last_change_time,
-            is_active: true,
+                active: true,
         }))
     }
 }
@@ -511,7 +512,7 @@ pub(super) trait ThresholdType: Sized {
         action: &xr::Action<Self::T>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<xr::ActionState<f32>>;
+    ) -> xr::XrResult<xr::ActionState<f32>>;
 }
 pub(super) struct Vector2;
 pub(super) struct Float;
@@ -529,7 +530,7 @@ impl ThresholdType for Vector2 {
         action: &xr::Action<Self::T>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<xr::ActionState<f32>> {
+    ) -> xr::XrResult<xr::ActionState<f32>> {
         let state = action.state(session, subaction_path)?;
         Ok(xr::ActionState {
             is_active: state.is_active,
@@ -553,7 +554,7 @@ impl ThresholdType for Float {
         action: &xr::Action<Self::T>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<xr::ActionState<f32>> {
+    ) -> xr::XrResult<xr::ActionState<f32>> {
         action.state(session, subaction_path)
     }
 }
@@ -621,9 +622,9 @@ impl<T: ThresholdType> BoolCustomBinding for ThresholdBindingData<T> {
         action: &Self::ExtraActions<Actions>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>> {
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let state = T::state(action, session, subaction_path)?;
-        if !state.is_active {
+        if !state.is_active() {
             return Ok(None);
         }
 
@@ -649,13 +650,13 @@ impl<T: ThresholdType> BoolCustomBinding for ThresholdBindingData<T> {
             current_state,
             changed_since_last_sync,
             last_change_time: state.last_change_time,
-            is_active: true,
+                active: true,
         }))
     }
 }
 
 mod atomic_time {
-    use openxr as xr;
+    use crate::winlatorxr as xr;
     use std::sync::atomic::{AtomicI64, Ordering};
 
     pub struct AtomicTime(AtomicI64);
@@ -727,7 +728,7 @@ impl BoolCustomBinding for DoubleTapData {
         action: &Self::ExtraActions<Actions>,
         session: &xr::Session<xr::AnyGraphics>,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>> {
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let state = action.state(session, subaction_path)?;
         if !state.is_active {
             return Ok(None);
@@ -816,10 +817,10 @@ impl BoolBindingData {
 
     pub fn state(
         &self,
-        session: &SessionData,
+        session: &SessionData<DirectX11>,
         extra_data: &ExtraActionData,
         subaction_path: xr::Path,
-    ) -> xr::Result<Option<xr::ActionState<bool>>> {
+    ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         assert_ne!(subaction_path, xr::Path::NULL);
         macro_rules! get_state {
             ($data:ident, $action_name:ident) => {{
@@ -871,7 +872,7 @@ mod tests {
     use crate::input::profiles::oculus_touch::OculusTouch;
     use crate::input::profiles::vive_controller::ViveWands;
     use crate::input::tests::{ExtraActionType, Fixture};
-    use crate::openxr_data::Hand;
+    use crate::winlatorxr::Hand;
     use fakexr::ActionState;
     use fakexr::UserPath::*;
     use openvr as vr;

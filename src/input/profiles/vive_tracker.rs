@@ -1,5 +1,5 @@
 use super::{InteractionProfile, MainAxisType, ProfileProperties, Property, SkeletalInputBindings};
-use crate::{input::legacy::LegacyBindings, openxr_data::Hand};
+use crate::{input::legacy::LegacyBindings, winlatorxr::{Hand, ExtensionSet}};
 use glam::Mat4;
 
 pub struct ViveTracker;
@@ -9,7 +9,7 @@ impl InteractionProfile for ViveTracker {
     fn profile_path() -> &'static str {
         "/interaction_profiles/htc/vive_tracker_htcx"
     }
-    fn has_required_extensions(_: &openxr::ExtensionSet) -> bool {
+    fn has_required_extensions(_: &ExtensionSet) -> bool {
         true
     }
     fn properties() -> &'static ProfileProperties {

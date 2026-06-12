@@ -7,16 +7,18 @@ mod compositor;
 mod graphics_backends;
 mod input;
 mod misc_unknown;
-mod openxr_data;
 mod overlay;
 mod overlayview;
 mod rendermodels;
 mod screenshots;
 mod settings;
 mod system;
+mod udp_communication;
+mod winlatorxr;
+mod wxr_data;
 
-#[cfg(not(test))]
-mod error_dialog;
+// #[cfg(not(test))]
+// mod error_dialog;
 
 use clientcore::ClientCore;
 use openvr as vr;
@@ -26,6 +28,8 @@ use std::sync::{
     Arc,
     atomic::{AtomicU32, AtomicU64, Ordering},
 };
+
+pub use winlatorxr::*;
 
 macro_rules! warn_unimplemented {
     ($function:literal) => {

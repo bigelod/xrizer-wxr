@@ -1,4 +1,4 @@
-use crate::openxr_data::RealOpenXrData;
+use crate::winlatorxr::RealOpenXrData;
 use openvr as vr;
 use std::sync::Arc;
 

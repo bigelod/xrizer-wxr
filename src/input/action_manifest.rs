@@ -9,10 +9,10 @@ use crate::input::InteractionProfile;
 use crate::input::action_manifest::context::BindingsLoadContext;
 use crate::input::profiles::LegalPathsT;
 use crate::input::{ActionKey, Input, profiles::RunWithProfile, skeletal::SkeletalInputActionData};
-use crate::openxr_data::{self, Hand, SessionData};
+use crate::winlatorxr::{self, Hand, SessionData};
 use log::{debug, error, info, warn};
 use openvr as vr;
-use openxr as xr;
+use crate::winlatorxr as xr;
 use slotmap::{SecondaryMap, SlotMap};
 use std::collections::{HashMap, HashSet};
 use std::env::current_dir;
@@ -34,10 +34,10 @@ fn action_map_to_secondary<T>(
         .collect()
 }
 
-impl<C: openxr_data::Compositor> Input<C> {
+impl<C: crate::winlatorxr::Compositor> Input<C> {
     pub(super) fn load_action_manifest(
         &self,
-        session_data: &SessionData,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         manifest_path: &Path,
     ) -> Result<(), vr::EVRInputError> {
         match self.loaded_actions_path.get() {
@@ -128,7 +128,7 @@ impl<C: openxr_data::Compositor> Input<C> {
             .create_action_set("xrizer-haptic-set", "XRizer haptic set", 0)
             .unwrap();
         let haptic_action = haptic_set
-            .create_action::<xr::Haptic>(
+            .create_action::<xr::HapticTy>(
                 "xrizer-haptic-action",
                 "XRizer haptic action",
                 &[self.subaction_paths.left, self.subaction_paths.right],
@@ -248,7 +248,7 @@ impl<C: openxr_data::Compositor> Input<C> {
     }
 }
 
-impl<C: openxr_data::Compositor> Input<C> {
+impl<C: crate::winlatorxr::Compositor> Input<C> {
     fn load_bindings(
         &self,
         parent_path: &Path,
@@ -301,12 +301,12 @@ impl<C: openxr_data::Compositor> Input<C> {
                     other.run_for_profile(&mut runner);
 
                     // lifetime moment
-                    struct Runner<'a, 'b, 'c, C: openxr_data::Compositor>(
+                    struct Runner<'a, 'b, 'c, C: crate::winlatorxr::Compositor>(
                         &'a Input<C>,
                         &'b mut BindingsLoadContext<'c>,
                         bindings::Bindings,
                     );
-                    impl<C: openxr_data::Compositor> RunWithProfile for Runner<'_, '_, '_, C> {
+                    impl<C: crate::winlatorxr::Compositor> RunWithProfile for Runner<'_, '_, '_, C> {
                         fn run<P: super::InteractionProfile>(&mut self) {
                             if let Some(mut context) = self.1.for_profile::<C, P>(self.0) {
                                 self.0

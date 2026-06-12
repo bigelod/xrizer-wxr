@@ -6,9 +6,9 @@ use crate::input::custom_bindings::{
 use crate::input::profiles::{DynInputPath, paths};
 use crate::input::skeletal::SkeletalInputActionData;
 use crate::input::{ActionData, BoundPose, ExtraActionData, Input, InteractionProfile};
-use crate::openxr_data::{self, Hand};
+use crate::winlatorxr::{self, Hand, HapticTy};
 use log::{info, trace, warn};
-use openxr as xr;
+use crate::winlatorxr as xr;
 use std::collections::HashMap;
 
 pub(super) struct BindingsLoadContext<'a> {
@@ -19,7 +19,7 @@ pub(super) struct BindingsLoadContext<'a> {
     pub per_profile_pose_bindings: HashMap<xr::Path, HashMap<String, BoundPose>>,
     pub grip_action: &'a xr::Action<xr::Posef>,
     pub info_action: &'a xr::Action<bool>,
-    pub haptic_action: &'a xr::Action<xr::Haptic>,
+    pub haptic_action: &'a xr::Action<HapticTy>,
     pub skeletal_input: &'a SkeletalInputActionData,
 }
 
@@ -29,7 +29,7 @@ impl<'a> BindingsLoadContext<'a> {
         actions: LoadedActionDataMap,
         grip_action: &'a xr::Action<xr::Posef>,
         info_action: &'a xr::Action<bool>,
-        haptic_action: &'a xr::Action<xr::Haptic>,
+        haptic_action: &'a xr::Action<HapticTy>,
         skeletal_input: &'a SkeletalInputActionData,
     ) -> Self {
         BindingsLoadContext {
@@ -47,7 +47,7 @@ impl<'a> BindingsLoadContext<'a> {
 }
 
 impl BindingsLoadContext<'_> {
-    pub fn for_profile<'a, 'b: 'a, C: openxr_data::Compositor, P: InteractionProfile>(
+    pub fn for_profile<'a, 'b: 'a, C: crate::winlatorxr::Compositor, P: InteractionProfile>(
         &'b mut self,
         input: &'a Input<C>,
     ) -> Option<BindingsProfileLoadContext<'a>> {
@@ -106,7 +106,7 @@ pub(super) struct BindingsProfileLoadContext<'a> {
     pub pose_bindings: &'a mut HashMap<String, BoundPose>,
     pub grip_action: &'a xr::Action<xr::Posef>,
     pub info_action: &'a xr::Action<bool>,
-    pub haptic_action: &'a xr::Action<xr::Haptic>,
+    pub haptic_action: &'a xr::Action<HapticTy>,
     pub skeletal_input: &'a SkeletalInputActionData,
     pub instance: &'a xr::Instance,
     pub hands: [xr::Path; 2],
@@ -122,7 +122,7 @@ pub(super) struct DpadActivatorData {
 
 pub(super) struct DpadHapticData {
     pub key: String,
-    pub action: xr::Action<xr::Haptic>,
+    pub action: xr::Action<HapticTy>,
     pub binding: xr::Path,
 }
 
@@ -192,7 +192,7 @@ impl BindingsProfileLoadContext<'_> {
     pub fn add_custom_binding<T: CustomBindingHelper>(
         &mut self,
         output: &ActionPath,
-        hand: openxr_data::Hand,
+        hand: crate::winlatorxr::Hand,
         action_set_name: &str,
         action_set: &xr::ActionSet,
         params: Option<&T::BindingParams>,
@@ -332,14 +332,14 @@ impl BindingsProfileLoadContext<'_> {
                     let haptic_name = format!("xrizer-dpad-haptic{len}");
                     let localized = format!("XRizer dpad haptic ({len})");
 
-                    ActionData::Haptic(
+                    ActionData::HapticTy(
                         action_set
                             .create_action(&haptic_name, &localized, &self.hands)
                             .unwrap(),
                     )
                 });
 
-                let ActionData::Haptic(action) = action else {
+                let ActionData::HapticTy(action) = action else {
                     unreachable!();
                 };
                 DpadHapticData {

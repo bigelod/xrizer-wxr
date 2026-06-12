@@ -5,7 +5,7 @@ use super::{
 use crate::button_mask_from_ids;
 use crate::input::legacy::{self, LegacyBindings, button_mask_from_id};
 use crate::input::profiles::DynInputPath;
-use crate::openxr_data::Hand;
+use crate::winlatorxr::{Hand, ExtensionSet};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use openvr::EVRButtonId as btn;
 
@@ -63,7 +63,7 @@ impl InteractionProfile for ViveFocus3 {
     fn profile_path() -> &'static str {
         "/interaction_profiles/htc/vive_focus3_controller"
     }
-    fn has_required_extensions(enabled_extensions: &openxr::ExtensionSet) -> bool {
+    fn has_required_extensions(enabled_extensions: &ExtensionSet) -> bool {
         enabled_extensions.htc_vive_focus3_controller_interaction
     }
     fn translate_path(path: DynInputPath) -> Option<DynInputPath> {
@@ -150,7 +150,7 @@ impl InteractionProfile for ViveFocus3 {
 mod tests {
     use super::{InteractionProfile, ViveFocus3};
     use crate::input::tests::Fixture;
-    use openxr as xr;
+    use crate::winlatorxr as xr;
 
     #[test]
     fn verify_bindings() {

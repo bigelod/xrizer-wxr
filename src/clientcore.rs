@@ -4,7 +4,7 @@ use crate::{
     compositor::Compositor,
     input::Input,
     misc_unknown::UnknownInterfaces,
-    openxr_data::{OpenXrData, RealOpenXrData},
+    winlatorxr::{OpenXrData, RealOpenXrData},
     overlay::OverlayMan,
     overlayview::OverlayView,
     rendermodels::RenderModels,

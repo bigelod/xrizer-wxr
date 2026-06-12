@@ -4,11 +4,10 @@ use crate::{
         LoadedActions, ManifestLoadedActions,
         profiles::{self, RunWithProfile},
     },
-    openxr_data::{self},
+    winlatorxr::{self as xr, HapticVibration},
 };
 use log::{debug, trace, warn};
 use openvr as vr;
-use openxr as xr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 #[derive(Default)]
@@ -37,7 +36,7 @@ macro_rules! button_mask_from_ids {
     };
 }
 
-impl<C: openxr_data::Compositor> Input<C> {
+impl<C: xr::Compositor> Input<C> {
     pub fn setup_legacy_actions(&self) {
         debug!("setting up legacy actions");
 
@@ -293,7 +292,7 @@ impl<C: openxr_data::Compositor> Input<C> {
 }
 
 mod marker {
-    use openxr as xr;
+    use crate::winlatorxr as xr;
     // Some type magic to parameterize our legacy actions to act as actions or bindings
     pub trait ActionsMarker {
         type T<U: xr::ActionTy>;
@@ -331,7 +330,7 @@ pub(super) struct Legacy<M: ActionsMarker> {
     pub main_xy: Action<xr::Vector2f, M>,
     pub main_xy_touch: Action<bool, M>,
     pub main_xy_click: Action<bool, M>,
-    pub haptic: Action<xr::Haptic, M>,
+    pub haptic: Action<xr::HapticTy, M>,
     pub extra: M,
 }
 
@@ -348,7 +347,7 @@ impl LegacyBindings {
             ($begin:expr, $($field:ident),+$(,)?) => {
                 $begin $(
                     .chain(
-                        self.$field.into_iter().map(|path| xr::Binding::new(&actions.$field, path))
+                        self.$field.into_iter().map(|path| xr::Binding::new(&actions.$field.path, &path))
                     )
                 )+
             }
@@ -359,7 +358,7 @@ impl LegacyBindings {
             self.extra
                 .grip_pose
                 .into_iter()
-                .map(|path| xr::Binding::new(&pose_data.grip, path)),
+                .map(|path| xr::Binding::new(&pose_data.grip.path, &path)),
             app_menu,
             a,
             trigger_click,
@@ -422,9 +421,8 @@ impl LegacyActionData {
 mod tests {
     use crate::input::profiles::{knuckles::Knuckles, simple_controller::SimpleController};
     use crate::input::tests::{Fixture, compare_pose};
-    use crate::openxr_data::Hand;
+    use crate::winlatorxr::Hand;
     use openvr as vr;
-    use openxr as xr;
 
     #[repr(C)]
     #[derive(Default)]

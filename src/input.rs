@@ -13,13 +13,14 @@ pub use profiles::InteractionProfile;
 
 use devices::{SubactionPaths, TrackedDevice, TrackedDeviceList};
 use skeletal::FingerState;
+use crate::graphics_backends::DirectX11;
 use skeletal::SkeletalInputActionData;
 
 use crate::input::devices::ProfileData;
 use crate::input::profiles::RunWithProfile;
 use crate::{
     AtomicF32,
-    openxr_data::{self, Hand, OpenXrData, SessionData},
+    winlatorxr::{self, Hand, OpenXrData, SessionData},
     tracy_span,
 };
 use custom_bindings::{BoolBindingData, GrabActions};
@@ -27,7 +28,7 @@ use glam::Quat;
 use legacy::LegacyActionData;
 use log::{debug, info, trace, warn};
 use openvr as vr;
-use openxr as xr;
+use crate::winlatorxr as xr;
 use slotmap::{Key, KeyData, SecondaryMap, SlotMap, new_key_type};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -47,7 +48,7 @@ new_key_type! {
 #[derive(macros::InterfaceImpl)]
 #[interface = "IVRInput"]
 #[versions(010, 007, 006, 005, 004)]
-pub struct Input<C: openxr_data::Compositor> {
+pub struct Input<C: winlatorxr::Compositor> {
     openxr: Arc<OpenXrData<C>>,
     vtables: Vtables<C>,
     input_source_map: RwLock<SlotMap<InputSourceKey, CString>>,
@@ -98,7 +99,7 @@ impl<T> Drop for WriteOnDrop<T> {
     }
 }
 
-impl<C: openxr_data::Compositor> Input<C> {
+impl<C: crate::winlatorxr::Compositor> Input<C> {
     pub fn new(openxr: Arc<OpenXrData<C>>) -> Self {
         let mut map = SlotMap::with_key();
         let left_hand_key = map.insert(c"/user/hand/left".into());
@@ -168,17 +169,17 @@ impl<C: openxr_data::Compositor> Input<C> {
         match left_state {
             None => self.state_from_bindings(action, self.right_hand_key.0.as_ffi()),
             Some((left, _)) => {
-                if left.is_active && left.current_state {
+                if left.is_active() && left.current_state {
                     return left_state;
                 }
                 let right_state = self.state_from_bindings(action, self.right_hand_key.0.as_ffi());
                 match right_state {
                     None => left_state,
                     Some((right, _)) => {
-                        if right.is_active && right.current_state {
+                        if right.is_active() && right.current_state {
                             return right_state;
                         }
-                        if left.is_active {
+                        if left.is_active() {
                             return left_state;
                         }
                         right_state
@@ -219,9 +220,9 @@ impl<C: openxr_data::Compositor> Input<C> {
                 continue;
             };
 
-            if state.is_active
-                && (!best_state.is_some_and(|x| x.is_active)
-                    || state.current_state && !best_state.is_some_and(|x| x.current_state))
+            if state.is_active()
+                && (!best_state.is_some_and(|x| x.is_active())
+                    || state.current_state && !best_state.is_some_and(|x| x.current_state()))
             {
                 best_state = Some(state);
                 if state.current_state {
@@ -278,7 +279,7 @@ enum ActionData {
     },
     Pose,
     Skeleton(Hand),
-    Haptic(xr::Action<xr::Haptic>),
+    Haptic(xr::Action<xr::HapticTy>),
 }
 
 #[derive(Default)]
@@ -343,7 +344,7 @@ macro_rules! get_subaction_path {
     };
 }
 
-impl<C: openxr_data::Compositor> vr::IVRInput010_Interface for Input<C> {
+impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
     fn GetBindingVariant(
         &self,
         _: vr::VRInputValueHandle_t,
@@ -1197,7 +1198,7 @@ impl<C: openxr_data::Compositor> vr::IVRInput010_Interface for Input<C> {
     }
 }
 
-impl<C: openxr_data::Compositor> vr::IVRInput005On006 for Input<C> {
+impl<C: winlatorxr::Compositor> vr::IVRInput005On006 for Input<C> {
     #[inline]
     fn GetSkeletalSummaryData(
         &self,
@@ -1234,7 +1235,7 @@ impl<C: openxr_data::Compositor> vr::IVRInput005On006 for Input<C> {
     }
 }
 
-impl<C: openxr_data::Compositor> vr::IVRInput004On005 for Input<C> {
+impl<C: winlatorxr::Compositor> vr::IVRInput004On005 for Input<C> {
     #[inline]
     fn DecompressSkeletalBoneData(
         &self,
@@ -1324,8 +1325,8 @@ impl<C: openxr_data::Compositor> vr::IVRInput004On005 for Input<C> {
     }
 }
 
-impl<C: openxr_data::Compositor> Input<C> {
-    pub fn interaction_profile_changed(&self, session_data: &SessionData) {
+impl<C: crate::winlatorxr::Compositor> Input<C> {
+    pub fn interaction_profile_changed(&self, session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>) {
         let mut devices = session_data.input_data.devices.write().unwrap();
 
         let mut devices_to_create = vec![];
@@ -1508,7 +1509,7 @@ impl<C: openxr_data::Compositor> Input<C> {
         }
     }
 
-    pub fn post_session_restart(&self, data: &SessionData) {
+    pub fn post_session_restart(&self, data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>) {
         // This function is called while a write lock is called on the session, and as such should
         // not use self.openxr.session_data.get().
         data.input_data
@@ -1704,7 +1705,7 @@ impl HandSpace {
     pub fn try_get_or_init_raw(
         &self,
         hand_profile: &Option<ProfileData>,
-        session_data: &SessionData,
+        session_data: &SessionData<DirectX11>,
         pose_data: &PoseData,
     ) -> Option<SpaceReadGuard<'_>> {
         {
