@@ -332,14 +332,14 @@ impl BindingsProfileLoadContext<'_> {
                     let haptic_name = format!("xrizer-dpad-haptic{len}");
                     let localized = format!("XRizer dpad haptic ({len})");
 
-                    ActionData::HapticTy(
+                    ActionData::Haptic(
                         action_set
                             .create_action(&haptic_name, &localized, &self.hands)
                             .unwrap(),
                     )
                 });
 
-                let ActionData::HapticTy(action) = action else {
+                let ActionData::Haptic(action) = action else {
                     unreachable!();
                 };
                 DpadHapticData {

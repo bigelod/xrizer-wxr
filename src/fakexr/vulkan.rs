@@ -1,5 +1,9 @@
+//! Test doubles for the Vulkan loader used in test builds.
+//!
+//! This mirrors the functions the real `ash` loader would dispatch to, so that
+//! swapchain and device setup can run without a physical GPU present.
+
 use ash::vk::{self, Handle};
-use openxr_sys as xr_sys;
 use paste::paste;
 use std::ffi::{CStr, c_char};
 
@@ -17,18 +21,6 @@ macro_rules! get_fn {
             )+
             _ => None
         }
-    }
-}
-
-pub fn session_create_info() -> xr_sys::GraphicsBindingVulkanKHR {
-    xr_sys::GraphicsBindingVulkanKHR {
-        ty: xr_sys::GraphicsBindingVulkanKHR::TYPE,
-        next: std::ptr::null(),
-        instance: std::ptr::null(),
-        physical_device: std::ptr::null(),
-        device: std::ptr::null(),
-        queue_family_index: 0,
-        queue_index: 0,
     }
 }
 
@@ -51,6 +43,7 @@ pub unsafe extern "system" fn get_instance_proc_addr(
         ]
     }
 }
+
 #[allow(clippy::missing_transmute_annotations)]
 extern "system" fn get_device_proc_addr(
     device: vk::Device,
@@ -147,76 +140,5 @@ extern "system" fn get_physical_device_queue_family_properties(
             queue_flags: vk::QueueFlags::GRAPHICS,
             ..Default::default()
         };
-    }
-}
-
-pub(crate) mod xr {
-    use openxr_sys as xr;
-    use std::ffi::{CStr, c_char};
-
-    pub extern "system" fn get_vulkan_instance_extensions_k_h_r(
-        _: xr::Instance,
-        _: xr::SystemId,
-        buffer_capacity_input: u32,
-        buffer_count_output: *mut u32,
-        buffer: *mut c_char,
-    ) -> xr::Result {
-        static EXTS: &CStr = c"VK_foo VK_bar";
-        static LEN: usize = EXTS.count_bytes() + 1;
-
-        if !buffer_count_output.is_null() {
-            unsafe { *buffer_count_output = LEN as u32 };
-        }
-        if buffer_capacity_input >= LEN as u32 {
-            let buf =
-                unsafe { std::slice::from_raw_parts_mut(buffer, buffer_capacity_input as usize) };
-            let bytes = EXTS.to_bytes_with_nul();
-            let bytes = unsafe { std::slice::from_raw_parts(bytes.as_ptr() as _, bytes.len()) };
-            buf[..LEN].copy_from_slice(bytes);
-        } else if buffer_capacity_input > 0 {
-            return xr::Result::ERROR_SIZE_INSUFFICIENT;
-        }
-        xr::Result::SUCCESS
-    }
-
-    pub extern "system" fn get_vulkan_device_extensions_k_h_r(
-        instance: xr::Instance,
-        system_id: xr::SystemId,
-        buffer_capacity_input: u32,
-        buffer_count_output: *mut u32,
-        buffer: *mut c_char,
-    ) -> xr::Result {
-        get_vulkan_instance_extensions_k_h_r(
-            instance,
-            system_id,
-            buffer_capacity_input,
-            buffer_count_output,
-            buffer,
-        )
-    }
-
-    pub extern "system" fn get_vulkan_graphics_device_k_h_r(
-        _: xr::Instance,
-        _: xr::SystemId,
-        _: xr::platform::VkInstance,
-        _: *mut xr::platform::VkPhysicalDevice,
-    ) -> xr::Result {
-        xr::Result::SUCCESS
-    }
-
-    pub extern "system" fn get_vulkan_graphics_requirements_k_h_r(
-        _: xr::Instance,
-        _: xr::SystemId,
-        graphics_requirements: *mut xr::GraphicsRequirementsVulkanKHR,
-    ) -> xr::Result {
-        unsafe {
-            *graphics_requirements = xr::GraphicsRequirementsVulkanKHR {
-                ty: xr::GraphicsRequirementsVulkanKHR::TYPE,
-                next: std::ptr::null_mut(),
-                min_api_version_supported: xr::Version::new(1, 0, 0),
-                max_api_version_supported: xr::Version::new(1, 0, 0),
-            }
-        };
-        xr::Result::SUCCESS
     }
 }

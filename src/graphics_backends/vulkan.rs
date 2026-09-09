@@ -83,9 +83,9 @@ impl GraphicsBackend for VulkanData {
             });
 
         VulkanSessionCreateInfo {
-            instance: self.instance.handle().as_raw() as _,
-            physical_device: self.physical_device.as_raw() as _,
-            device: self.device.handle().as_raw() as _,
+            instance: self.instance.handle(),
+            physical_device: self.physical_device,
+            device: self.device.handle(),
             queue_family_index: self.queue_family_index,
             queue_index,
         }
@@ -99,7 +99,7 @@ impl GraphicsBackend for VulkanData {
         }
     }
     fn store_swapchain_images(&mut self, images: Vec<SwapchainImageVulkanKHR>, format: u64) {
-        let images: Vec<vk::Image> = images.into_iter().map(vk::Image::from_raw).collect();
+        let images: Vec<vk::Image> = images.into_iter().map(|img| img.image).collect();
         let pool = unsafe {
             self.device
                 .create_command_pool(
@@ -135,6 +135,19 @@ impl GraphicsBackend for VulkanData {
         }
     }
 
+    fn swapchain_images_from_handles(
+        &self,
+        handles: Vec<u64>,
+    ) -> Vec<SwapchainImageVulkanKHR> {
+        handles
+            .into_iter()
+            .map(|handle| SwapchainImageVulkanKHR {
+                image: vk::Image::from_raw(handle),
+                array_size: 1,
+            })
+            .collect()
+    }
+
     fn swapchain_info_for_texture(
         &self,
         texture: *const vr::VRVulkanTextureData_t,
@@ -143,22 +156,21 @@ impl GraphicsBackend for VulkanData {
     ) -> SwapchainCreateInfo<Self::Api> {
         let texture = unsafe { texture.as_ref() }.unwrap();
         let (extent, _) = texture_extent_from_bounds(texture, bounds);
-        SwapchainCreateInfo {
-            create_flags: SwapchainCreateFlags::EMPTY,
-            usage_flags: SwapchainUsageFlags::COLOR_ATTACHMENT
-                | SwapchainUsageFlags::TRANSFER_DST,
-            format: get_colorspace_corrected_format(
+        SwapchainCreateInfo::new(
+            extent.width,
+            extent.height,
+            get_colorspace_corrected_format(
                 vk::Format::from_raw(texture.m_nFormat as _),
                 color_space,
             )
             .as_raw() as _,
-            sample_count: texture.m_nSampleCount,
-            width: extent.width,
-            height: extent.height,
-            face_count: 1,
-            array_size: 2,
-            mip_count: 1,
-        }
+            texture.m_nSampleCount,
+            SwapchainCreateFlags::EMPTY,
+            SwapchainUsageFlags::COLOR_ATTACHMENT | SwapchainUsageFlags::TRANSFER_DST,
+            1,
+            2,
+            1,
+        )
     }
 
     fn copy_texture_to_swapchain(
@@ -458,7 +470,7 @@ impl GraphicsBackend for VulkanData {
             self.device.destroy_image_view(game_view, None);
         }
 
-        XrExtent2Df {
+        Extent2Di {
             width: extent.width as _,
             height: extent.height as _,
         }
@@ -520,11 +532,9 @@ impl VulkanData {
     pub fn new_temporary(xr_instance: &Instance, system_id: SystemId) -> Self {
         let entry = new_entry();
 
-        let inst_exts = xr_instance
+        let inst_exts: Vec<CString> = xr_instance
             .vulkan_legacy_instance_extensions(system_id)
-            .unwrap();
-        let inst_exts: Vec<CString> = inst_exts
-            .split_ascii_whitespace()
+            .into_iter()
             .map(|ext| CString::new(ext).unwrap())
             .collect();
         let inst_exts: Vec<*const c_char> = inst_exts.iter().map(|ext| ext.as_ptr()).collect();
@@ -544,16 +554,10 @@ impl VulkanData {
                 .expect("Failed to create temporary Vulkan instance")
         };
 
-        let physical_device = vk::PhysicalDevice::from_raw(unsafe {
-            xr_instance
-                .vulkan_graphics_device(system_id, instance.handle().as_raw() as _)
-                .expect("Failed to get temporary Vulkan physical device") as _
-        });
-        let dev_exts = xr_instance
+        let physical_device = xr_instance.vulkan_graphics_device(system_id, instance.handle());
+        let dev_exts: Vec<CString> = xr_instance
             .vulkan_legacy_device_extensions(system_id)
-            .unwrap();
-        let dev_exts: Vec<CString> = dev_exts
-            .split_ascii_whitespace()
+            .into_iter()
             .map(|ext| CString::new(ext).unwrap())
             .collect();
         let dev_exts: Vec<*const c_char> = dev_exts.iter().map(|ext| ext.as_ptr()).collect();
@@ -909,7 +913,7 @@ fn new_entry() -> ash::Entry {
     #[cfg(test)]
     unsafe {
         ash::Entry::from_static_fn(ash::StaticFn {
-            get_instance_proc_addr: fakexr::vulkan::get_instance_proc_addr,
+            get_instance_proc_addr: crate::fakexr::vulkan::get_instance_proc_addr,
         })
     }
 }

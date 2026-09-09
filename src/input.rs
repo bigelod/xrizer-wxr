@@ -3,7 +3,7 @@ mod custom_bindings;
 mod devices;
 mod legacy;
 mod profiles;
-mod skeletal;
+pub(crate) mod skeletal;
 
 #[cfg(test)]
 mod tests;
@@ -166,14 +166,14 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         debug_assert!(self.right_hand_key.0.as_ffi() != 0);
         let left_state = self.state_from_bindings(action, self.left_hand_key.0.as_ffi());
 
-        match left_state {
+        match &left_state {
             None => self.state_from_bindings(action, self.right_hand_key.0.as_ffi()),
             Some((left, _)) => {
                 if left.is_active() && left.current_state {
                     return left_state;
                 }
                 let right_state = self.state_from_bindings(action, self.right_hand_key.0.as_ffi());
-                match right_state {
+                match &right_state {
                     None => left_state,
                     Some((right, _)) => {
                         if right.is_active() && right.current_state {
@@ -203,9 +203,9 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         let LoadedActions::Manifest(loaded_actions) = session.input_data.actions.get()? else {
             return None;
         };
+        let openxr_session = session.session.as_ref().unwrap();
 
-        let interaction_profile = session
-            .session
+        let interaction_profile = openxr_session
             .current_interaction_profile(subaction)
             .ok()?;
         let bindings = loaded_actions
@@ -220,12 +220,14 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
                 continue;
             };
 
-            if state.is_active()
-                && (!best_state.is_some_and(|x| x.is_active())
-                    || state.current_state && !best_state.is_some_and(|x| x.current_state()))
+            let is_active = state.is_active();
+            let current_state = state.current_state;
+            if is_active
+                && (!best_state.as_ref().is_some_and(|x| x.is_active())
+                    || current_state && !best_state.as_ref().is_some_and(|x| x.current_state()))
             {
                 best_state = Some(state);
-                if state.current_state {
+                if current_state {
                     break;
                 }
             }
@@ -380,9 +382,13 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         _: *const vr::InputBindingInfo_t,
         _: u32,
         _: u32,
-        _: *mut vr::RenderModel_ComponentState_t,
+        component_state: *mut vr::RenderModel_ComponentState_t,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("GetComponentStateForBinding");
+        if !component_state.is_null() {
+            unsafe { std::ptr::write_bytes(component_state, 0, 1) };
+        }
+        vr::EVRInputError::None
     }
     fn ShowBindingsForActionSet(
         &self,
@@ -391,14 +397,16 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         _: u32,
         _: vr::VRInputValueHandle_t,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("ShowBindingsForActionSet");
+        vr::EVRInputError::None
     }
     fn ShowActionOrigins(
         &self,
         _: vr::VRActionSetHandle_t,
         _: vr::VRActionHandle_t,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("ShowActionOrigins");
+        vr::EVRInputError::None
     }
     fn GetActionBindingInfo(
         &self,
@@ -496,7 +504,7 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
 
         action
             .apply_feedback(
-                &session_data.session,
+                session_data.session.as_ref().unwrap(),
                 subaction_path,
                 &xr::HapticVibration::new()
                     .amplitude(amplitude.clamp(0.0, 1.0))
@@ -515,7 +523,8 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         _: *mut vr::VRBoneTransform_t,
         _: u32,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("DecompressSkeletalBoneData");
+        vr::EVRInputError::InvalidParam
     }
     fn GetSkeletalBoneDataCompressed(
         &self,
@@ -525,7 +534,8 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         _: u32,
         _: *mut u32,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("GetSkeletalBoneDataCompressed");
+        vr::EVRInputError::InvalidParam
     }
     fn GetSkeletalSummaryData(
         &self,
@@ -634,7 +644,8 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         _: *mut c_char,
         _: u32,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("GetBoneName");
+        vr::EVRInputError::None
     }
     fn GetBoneHierarchy(
         &self,
@@ -642,7 +653,8 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         _: *mut vr::BoneIndex_t,
         _: u32,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("GetBoneHierarchy");
+        vr::EVRInputError::None
     }
     fn GetBoneCount(&self, handle: vr::VRActionHandle_t, count: *mut u32) -> vr::EVRInputError {
         get_action_from_handle!(self, handle, session_data, action);
@@ -693,7 +705,7 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
             std::ptr::addr_of_mut!((*action_data).bActive).write(
                 pose_data
                     .grip
-                    .is_active(&data.session, xr::Path::NULL)
+                    .is_active(data.session.as_ref().unwrap(), xr::Path::NULL)
                     .unwrap(),
             );
             std::ptr::addr_of_mut!((*action_data).activeOrigin).write(origin);
@@ -880,7 +892,7 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
         let mut active_hand = restrict_to_device;
         let (state, delta) = match action {
             ActionData::Vector1 { action, last_value } => {
-                let mut state = action.state(&session_data.session, subaction_path).unwrap();
+                let mut state = action.state(session_data.session.as_ref().unwrap(), subaction_path).unwrap();
 
                 // It's generally not clear how SteamVR handles float actions with multiple bindings;
                 //   so emulate OpenXR, which takes maximum among active actions
@@ -921,7 +933,7 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
                 )
             }
             ActionData::Vector2 { action, last_value } => {
-                let state = action.state(&session_data.session, subaction_path).unwrap();
+                let state = action.state(session_data.session.as_ref().unwrap(), subaction_path).unwrap();
                 let delta = xr::Vector2f {
                     x: state.current_state.x - last_value.0.swap(state.current_state.x),
                     y: state.current_state.y - last_value.1.swap(state.current_state.y),
@@ -964,7 +976,7 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
             return vr::EVRInputError::WrongType;
         };
 
-        let mut state = action.state(&session_data.session, subaction_path).unwrap();
+        let mut state = action.state(session_data.session.as_ref().unwrap(), subaction_path).unwrap();
 
         let mut active_hand = restrict_to_device;
         if let Some((binding_state, binding_source)) =
@@ -1043,7 +1055,7 @@ impl<C: winlatorxr::Compositor> vr::IVRInput010_Interface for Input<C> {
 
         {
             tracy_span!("xrSyncActions");
-            data.session.sync_actions(&sync_sets).unwrap();
+            data.session.as_ref().unwrap().sync_actions(&sync_sets).unwrap();
         }
 
         let devices = data.input_data.devices.read().unwrap();
@@ -1245,7 +1257,8 @@ impl<C: winlatorxr::Compositor> vr::IVRInput004On005 for Input<C> {
         _transform_array: *mut vr::VRBoneTransform_t,
         _transform_array_count: u32,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("DecompressSkeletalBoneData");
+        vr::EVRInputError::InvalidParam
     }
 
     #[inline]
@@ -1321,7 +1334,8 @@ impl<C: winlatorxr::Compositor> vr::IVRInput004On005 for Input<C> {
         _required_compressed_size: *mut u32,
         _restrict_to_device: vr::VRInputValueHandle_t,
     ) -> vr::EVRInputError {
-        todo!()
+        crate::warn_unimplemented!("GetSkeletalBoneDataCompressed");
+        vr::EVRInputError::InvalidParam
     }
 }
 
@@ -1337,6 +1351,8 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
 
             let profile_path = session_data
                 .session
+                .as_ref()
+                .unwrap()
                 .current_interaction_profile(subaction_path)
                 .unwrap();
 
@@ -1389,12 +1405,13 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
                 } else {
                     let hand_tracker = session_data
                         .session
-                        .create_hand_tracker(hand.into())
+                        .as_ref()
+                        .unwrap()
+                        .create_hand_tracker(hand)
                         .inspect_err(|e| {
                             if !matches!(
-                                *e,
-                                xr::sys::Result::ERROR_EXTENSION_NOT_PRESENT
-                                    | xr::sys::Result::ERROR_FEATURE_UNSUPPORTED
+                                e,
+                                xr::SessionCreationError::GraphicsBindingRequired
                             ) {
                                 log::warn!("Failed to create hand tracker for hand {hand:?}: {e}");
                             }
@@ -1439,6 +1456,27 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
             .unwrap();
     }
 
+    /// WinlatorXR never emits interaction-profile-changed events, so on a real
+    /// session we have to advertise the configured interaction profile
+    /// ourselves. This creates and connects the two controllers the first time
+    /// it runs; afterwards it is a no-op.
+    pub fn ensure_production_controllers(
+        &self,
+        session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
+    ) {
+        let devices = session_data.input_data.devices.read().unwrap();
+        let has_controllers = devices
+            .iter()
+            .any(|device| matches!(device.get_type(), TrackedDeviceType::Controller { .. }));
+        drop(devices);
+
+        if has_controllers {
+            return;
+        }
+
+        self.interaction_profile_changed(session_data);
+    }
+
     pub fn frame_start_update(&self) {
         tracy_span!();
         let data = self.openxr.session_data.get();
@@ -1463,6 +1501,8 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
             {
                 debug!("no controllers connected - syncing info set");
                 data.session
+                    .as_ref()
+                    .unwrap()
                     .sync_actions(&[xr::ActiveActionSet::new(&loaded.info_set)])
                     .unwrap();
             }
@@ -1472,6 +1512,8 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         match input_data.get_legacy_actions() {
             Some(actions) => {
                 data.session
+                    .as_ref()
+                    .unwrap()
                     .sync_actions(&[
                         xr::ActiveActionSet::new(&actions.set),
                         xr::ActiveActionSet::new(&input_data.pose_data.get().unwrap().set),
@@ -1596,7 +1638,7 @@ struct ManifestLoadedActions {
     info_set: xr::ActionSet,
     _info_action: xr::Action<bool>,
     haptic_set: xr::ActionSet,
-    haptic_action: xr::Action<xr::Haptic>,
+    haptic_action: xr::Action<xr::HapticTy>,
 }
 
 impl ManifestLoadedActions {
@@ -1725,23 +1767,18 @@ impl HandSpace {
             let rotation = Quat::from_mat4(&offset);
 
             let offset_pose = xr::Posef {
-                orientation: xr::Quaternionf {
-                    x: rotation.x,
-                    y: rotation.y,
-                    z: rotation.z,
-                    w: rotation.w,
-                },
-                position: xr::Vector3f {
-                    x: translation.x,
-                    y: translation.y,
-                    z: translation.z,
-                },
+                orientation: rotation,
+                position: translation,
             };
 
             *self.raw.write().unwrap() = Some(
                 pose_data
                     .grip
-                    .create_space(&session_data.session, self.hand_path, offset_pose)
+                    .create_space(
+                        session_data.session.as_ref().unwrap(),
+                        self.hand_path,
+                        offset_pose,
+                    )
                     .unwrap(),
             );
         }

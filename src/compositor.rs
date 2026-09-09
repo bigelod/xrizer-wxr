@@ -21,7 +21,7 @@ use std::time::Instant;
 use std::{ffi::c_char, ops::Deref};
 
 #[derive(Default)]
-pub struct CompositorSessionData(Mutex<Option<DynFrameController>>);
+pub struct CompositorSessionData(pub Mutex<Option<DynFrameController>>);
 
 #[derive(macros::InterfaceImpl)]
 #[interface = "IVRCompositor"]
@@ -203,11 +203,11 @@ fn fill_vk_extensions_buffer(extensions: String, buffer: *mut c_char, buffer_siz
 }
 
 impl winlatorxr::Compositor for Compositor {
-    fn get_session_create_info(&self, data: CompositorSessionData) -> SessionCreateInfo {
+    fn get_session_create_info(&self, data: &CompositorSessionData) -> SessionCreateInfo {
         #[macros::any_graphics(AnyTempBackendData)]
         fn info<G: GraphicsBackend>(data: &TempBackendData<G>) -> SessionCreateInfo
         where
-            SessionCreateInfo: From<winlatorxr::CreateInfo<G::Api>>,
+            SessionCreateInfo: From<winlatorxr::CreateInfo>,
         {
             SessionCreateInfo::from_info::<G::Api>(data.backend.session_create_info())
         }
@@ -241,7 +241,7 @@ impl winlatorxr::Compositor for Compositor {
         &self,
         session_data: &SessionData<DirectX11>,
         waiter: xr::FrameWaiter,
-        stream: FrameStream,
+        stream: FrameStream<DirectX11>,
     ) {
         // This function is called while a write lock is called on the session, and as such should
         // not use self.openxr.session_data.get().
@@ -258,14 +258,14 @@ impl winlatorxr::Compositor for Compositor {
             data: TempBackendData<G>,
             session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
             waiter: xr::FrameWaiter,
-            stream: FrameStream,
+            stream: FrameStream<DirectX11>,
         ) -> DynFrameController
         where
             for<'a> &'a winlatorxr::GraphicalSession<crate::graphics_backends::DirectX11>:
                 TryInto<&'a winlatorxr::Session<G::Api>, Error: std::fmt::Display>,
-            FrameStream: TryInto<xr::FrameStream<G::Api>>,
+            FrameStream<G::Api>: TryFrom<FrameStream<DirectX11>, Error: std::fmt::Display>,
             DynFrameController: From<FrameController<G>>,
-            <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug,
+            <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug + Copy,
         {
             FrameController::new(
                 session_data,
@@ -307,10 +307,10 @@ impl vr::IVRCompositor029_Interface for Compositor {
     fn GetPosesForFrame(
         &self,
         _unPosePredictionID: u32,
-        _pPoseArray: *mut vr::TrackedDevicePose_t,
-        _unPoseArrayCount: u32,
+        pPoseArray: *mut vr::TrackedDevicePose_t,
+        unPoseArrayCount: u32,
     ) -> vr::EVRCompositorError {
-        todo!()
+        self.GetLastPoses(pPoseArray, unPoseArrayCount, std::ptr::null_mut(), 0)
     }
     fn GetLastPosePredictionIDs(
         &self,
@@ -343,10 +343,10 @@ impl vr::IVRCompositor029_Interface for Compositor {
         false
     }
     fn IsMotionSmoothingSupported(&self) -> bool {
-        todo!()
+        false
     }
     fn IsMotionSmoothingEnabled(&self) -> bool {
-        todo!()
+        false
     }
     fn SubmitExplicitTimingData(&self) -> vr::EVRCompositorError {
         if *self.timing_mode.lock().unwrap() == vr::EVRCompositorTimingMode::Implicit {
@@ -359,7 +359,7 @@ impl vr::IVRCompositor029_Interface for Compositor {
         }
 
         let session_data = self.openxr.session_data.get();
-        self.maybe_begin_frame(&*session_data);
+        self.maybe_begin_frame(&session_data);
         vr::EVRCompositorError::None
     }
     fn SetExplicitTimingMode(&self, timing_mode: vr::EVRCompositorTimingMode) {
@@ -376,10 +376,9 @@ impl vr::IVRCompositor029_Interface for Compositor {
         let exts = self
             .openxr
             .instance
-            .vulkan_legacy_device_extensions(self.openxr.system_id)
-            .unwrap();
-        log::debug!("required device extensions: {exts}");
-        fill_vk_extensions_buffer(exts, buffer, buffer_size)
+            .vulkan_legacy_device_extensions(self.openxr.system_id);
+        log::debug!("required device extensions: {exts:?}");
+        fill_vk_extensions_buffer(exts.join(" "), buffer, buffer_size)
     }
 
     fn GetVulkanInstanceExtensionsRequired(
@@ -390,24 +389,24 @@ impl vr::IVRCompositor029_Interface for Compositor {
         let exts = self
             .openxr
             .instance
-            .vulkan_legacy_instance_extensions(self.openxr.system_id)
-            .unwrap();
-        log::debug!("required instance extensions: {exts}");
-        fill_vk_extensions_buffer(exts, buffer, buffer_size)
+            .vulkan_legacy_instance_extensions(self.openxr.system_id);
+        log::debug!("required instance extensions: {exts:?}");
+        fill_vk_extensions_buffer(exts.join(" "), buffer, buffer_size)
     }
 
     fn UnlockGLSharedTextureForAccess(&self, _glSharedTextureHandle: vr::glSharedTextureHandle_t) {
-        todo!()
+        crate::warn_unimplemented!("UnlockGLSharedTextureForAccess");
     }
     fn LockGLSharedTextureForAccess(&self, _glSharedTextureHandle: vr::glSharedTextureHandle_t) {
-        todo!()
+        crate::warn_unimplemented!("LockGLSharedTextureForAccess");
     }
     fn ReleaseSharedGLTexture(
         &self,
         _glTextureId: vr::glUInt_t,
         _glSharedTextureHandle: vr::glSharedTextureHandle_t,
     ) -> bool {
-        todo!()
+        crate::warn_unimplemented!("ReleaseSharedGLTexture");
+        false
     }
     fn GetMirrorTextureGL(
         &self,
@@ -415,10 +414,11 @@ impl vr::IVRCompositor029_Interface for Compositor {
         _pglTextureId: *mut vr::glUInt_t,
         _pglSharedTextureHandle: *mut vr::glSharedTextureHandle_t,
     ) -> vr::EVRCompositorError {
-        todo!()
+        crate::warn_unimplemented!("GetMirrorTextureGL");
+        vr::EVRCompositorError::IncompatibleVersion
     }
     fn ReleaseMirrorTextureD3D11(&self, _pD3D11ShaderResourceView: *mut std::ffi::c_void) {
-        todo!()
+        crate::warn_unimplemented!("ReleaseMirrorTextureD3D11");
     }
     fn GetMirrorTextureD3D11(
         &self,
@@ -449,7 +449,7 @@ impl vr::IVRCompositor029_Interface for Compositor {
             .for_each(|ctrl| ctrl.with_any_graphics_mut::<set_suspend_render>(bSuspend));
     }
     fn ForceReconnectProcess(&self) {
-        todo!()
+        crate::warn_unimplemented!("ForceReconnectProcess");
     }
     fn ForceInterleavedReprojectionOn(&self, _: bool) {
         crate::warn_unimplemented!("ForceInterleavedReprojectionOn");
@@ -459,31 +459,33 @@ impl vr::IVRCompositor029_Interface for Compositor {
         false
     }
     fn CompositorDumpImages(&self) {
-        todo!()
+        crate::warn_unimplemented!("CompositorDumpImages");
     }
     fn IsMirrorWindowVisible(&self) -> bool {
-        todo!()
+        crate::warn_unimplemented!("IsMirrorWindowVisible");
+        false
     }
     fn HideMirrorWindow(&self) {
-        todo!()
+        crate::warn_unimplemented!("HideMirrorWindow");
     }
     fn ShowMirrorWindow(&self) {
-        todo!()
+        crate::warn_unimplemented!("ShowMirrorWindow");
     }
     fn CanRenderScene(&self) -> bool {
         true
     }
     fn GetLastFrameRenderer(&self) -> u32 {
-        todo!()
+        crate::warn_unimplemented!("GetLastFrameRenderer");
+        0
     }
     fn GetCurrentSceneFocusProcess(&self) -> u32 {
-        todo!()
+        std::process::id()
     }
     fn IsFullscreen(&self) -> bool {
         true
     }
     fn CompositorQuit(&self) {
-        todo!()
+        crate::warn_unimplemented!("CompositorQuit");
     }
     fn CompositorGoToBack(&self) {
         crate::warn_unimplemented!("CompositorGoToBack");
@@ -558,7 +560,12 @@ impl vr::IVRCompositor029_Interface for Compositor {
             .for_each(|ctrl| ctrl.with_any_graphics_mut::<set_fade_grid>(bFadeGridIn));
     }
     fn GetCurrentFadeColor(&self, _bBackground: bool) -> vr::HmdColor_t {
-        todo!()
+        vr::HmdColor_t {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.0,
+        }
     }
     fn FadeToColor(
         &self,
@@ -573,17 +580,21 @@ impl vr::IVRCompositor029_Interface for Compositor {
     }
     fn GetCumulativeStats(
         &self,
-        _pStats: *mut vr::Compositor_CumulativeStats,
+        pStats: *mut vr::Compositor_CumulativeStats,
         _nStatsSizeInBytes: u32,
     ) {
-        todo!()
+        crate::warn_unimplemented!("GetCumulativeStats");
+        if !pStats.is_null() {
+            unsafe { std::ptr::write_bytes(pStats, 0, 1) };
+        }
     }
     fn GetFrameTimeRemaining(&self) -> f32 {
         crate::warn_unimplemented!("GetFrameTimeRemaining");
         0.0
     }
     fn GetFrameTimings(&self, _pTiming: *mut vr::Compositor_FrameTiming, _nFrames: u32) -> u32 {
-        todo!()
+        crate::warn_unimplemented!("GetFrameTimings");
+        0
     }
     fn GetFrameTiming(&self, timing: *mut vr::Compositor_FrameTiming, _frames_ago: u32) -> bool {
         if timing.is_null() || !timing.is_aligned() {
@@ -701,13 +712,13 @@ impl vr::IVRCompositor029_Interface for Compositor {
     }
     fn SubmitWithArrayIndex(
         &self,
-        _eEye: vr::EVREye,
-        _pTexture: *const vr::Texture_t,
+        eEye: vr::EVREye,
+        pTexture: *const vr::Texture_t,
         _unTextureArrayIndex: u32,
-        _pBounds: *const vr::VRTextureBounds_t,
-        _nSubmitFlags: vr::EVRSubmitFlags,
+        pBounds: *const vr::VRTextureBounds_t,
+        nSubmitFlags: vr::EVRSubmitFlags,
     ) -> vr::EVRCompositorError {
-        todo!()
+        self.Submit(eEye, pTexture, pBounds, nSubmitFlags)
     }
 
     fn GetSubmitTexture(
@@ -784,7 +795,7 @@ impl vr::IVRCompositor029_Interface for Compositor {
         where
             for<'d> &'d winlatorxr::GraphicalSession<crate::graphics_backends::DirectX11>:
                 TryInto<&'d winlatorxr::Session<G::Api>, Error: std::fmt::Display>,
-            <G::Api as xr::Graphics>::Format: Eq + std::fmt::Debug,
+            <G::Api as xr::Graphics>::Format: Eq + std::fmt::Debug + Copy,
         {
             let real_texture =
                 G::get_texture(texture).ok_or(vr::EVRCompositorError::InvalidTexture)?;
@@ -916,11 +927,18 @@ impl vr::IVRCompositor029_Interface for Compositor {
     }
 
     fn GetTrackingSpace(&self) -> vr::ETrackingUniverseOrigin {
-        self.openxr.get_tracking_space()
+        match self.openxr.get_tracking_space() {
+            xr::ReferenceSpaceType::Stage => vr::ETrackingUniverseOrigin::Standing,
+            _ => vr::ETrackingUniverseOrigin::Seated,
+        }
     }
 
     fn SetTrackingSpace(&self, origin: vr::ETrackingUniverseOrigin) {
-        self.openxr.set_tracking_space(origin);
+        let ty = match origin {
+            vr::ETrackingUniverseOrigin::Standing => xr::ReferenceSpaceType::Stage,
+            _ => xr::ReferenceSpaceType::Local,
+        };
+        self.openxr.set_tracking_space(ty);
     }
 }
 
@@ -962,10 +980,12 @@ impl vr::IVRCompositor015On016 for Compositor {
         _dest_file_name: *const std::ffi::c_char,
         _vr_dest_file_name: *const std::ffi::c_char,
     ) -> vr::EVRCompositorError {
-        todo!("RequestScreenshot (v1.0.1)");
+        crate::warn_unimplemented!("RequestScreenshot (v1.0.1)");
+        vr::EVRCompositorError::None
     }
     fn GetCurrentScreenshotType(&self) -> vr::EVRScreenshotType {
-        todo!("GetCurrentScreenshotType (v1.0.1)");
+        crate::warn_unimplemented!("GetCurrentScreenshotType (v1.0.1)");
+        vr::EVRScreenshotType::None
     }
 }
 
@@ -1015,7 +1035,7 @@ impl vr::IVRCompositor009On011 for Compositor {
 
 #[derive(Copy, Clone, Default)]
 struct SubmittedEye {
-    extent: crate::winlatorxr::XrExtent2Df,
+    extent: crate::graphics_backends::Extent2Di,
     flip_vertically: bool,
 }
 
@@ -1049,7 +1069,7 @@ impl<G: GraphicsBackend> FrameController<G> {
     where
         for<'a> &'a winlatorxr::GraphicalSession<crate::graphics_backends::DirectX11>:
             TryInto<&'a winlatorxr::Session<G::Api>, Error: std::fmt::Display>,
-        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug,
+        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug + Copy,
     {
         assert!(
             is_valid_swapchain_info(create_info),
@@ -1062,7 +1082,7 @@ impl<G: GraphicsBackend> FrameController<G> {
         session_data.check_format::<G>(create_info);
 
         let swapchain = session_data
-            .create_swapchain(create_info)
+            .create_swapchain::<G>(create_info)
             .unwrap_or_else(|err| {
                 panic!(
                     "Failed to create swapchain: {err} (info: {:#?})",
@@ -1079,7 +1099,10 @@ impl<G: GraphicsBackend> FrameController<G> {
             .enumerate_images()
             .expect("Failed to enumerate swapchain images");
 
-        backend.store_swapchain_images(images, create_info.format);
+        backend.store_swapchain_images(
+            backend.swapchain_images_from_handles(images),
+            create_info.format,
+        );
         debug!(
             "Created new swapchain: {}x{}, format = {:?}",
             create_info.width, create_info.height, create_info.format
@@ -1098,7 +1121,7 @@ impl<G: GraphicsBackend> FrameController<G> {
     where
         for<'a> &'a xr::GraphicalSession<crate::graphics_backends::DirectX11>:
             TryInto<&'a xr::Session<G::Api>, Error: std::fmt::Display>,
-        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug,
+        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug + Copy,
     {
         let swapchain_data = if let Some(mut info) = create_info {
             is_valid_swapchain_info(&info).then(|| {
@@ -1135,8 +1158,8 @@ impl<G: GraphicsBackend> FrameController<G> {
         mut create_info: xr::SwapchainCreateInfo<G::Api>,
     ) where
         for<'a> &'a xr::GraphicalSession<crate::graphics_backends::DirectX11>:
-            TryInto<&'a crate::winlatorxr::SessionData<DirectX11>, Error: std::fmt::Display>,
-        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug,
+            TryInto<&'a crate::winlatorxr::Session<G::Api>, Error: std::fmt::Display>,
+        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug + Copy,
     {
         let (swapchain, initial_format) =
             Self::init_swapchain(session_data, &mut create_info, &mut self.backend);
@@ -1165,7 +1188,7 @@ impl<G: GraphicsBackend> FrameController<G> {
         {
             tracy_span!("wait swapchain image");
             swapchain
-                .wait_image(xr::Duration::INFINITE)
+                .wait_image(xr::INFINITE)
                 .expect("Failed to wait for swapchain image");
         }
 
@@ -1180,7 +1203,7 @@ impl<G: GraphicsBackend> FrameController<G> {
         self.should_render = frame_state.should_render && !self.app_suspend_render;
         (
             frame_state.predicted_display_time,
-            frame_state.predicted_display_period.as_nanos(),
+            frame_state.predicted_display_period.as_nanos() as i64,
         )
     }
 
@@ -1220,8 +1243,8 @@ impl<G: GraphicsBackend> FrameController<G> {
     where
         <G::Api as xr::Graphics>::Format: Eq,
         for<'b> &'b xr::GraphicalSession<crate::graphics_backends::DirectX11>:
-            TryInto<&'b crate::winlatorxr::SessionData<DirectX11>, Error: std::fmt::Display>,
-        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug,
+            TryInto<&'b crate::winlatorxr::Session<G::Api>, Error: std::fmt::Display>,
+        <G::Api as xr::Graphics>::Format: PartialEq + std::fmt::Debug + Copy,
     {
         // No Man's Sky does this.
         if self.eyes_submitted[eye as usize].is_some() {
@@ -1242,7 +1265,7 @@ impl<G: GraphicsBackend> FrameController<G> {
                     );
 
                     if !self.swapchain_data.as_ref().is_some_and(|data| {
-                        is_usable_swapchain(&data.info, data.initial_format, &new_info)
+                        is_usable_swapchain(&data.info, &data.initial_format, &new_info)
                     }) {
                         info!("recreating swapchain (for {eye:?})");
                         self.recreate_swapchain(session_data, new_info);
@@ -1313,12 +1336,12 @@ impl<G: GraphicsBackend> FrameController<G> {
                         orientation: if flags.contains(xr::ViewStateFlags::ORIENTATION_VALID) {
                             view.pose.orientation
                         } else {
-                            crate::winlatorxr::Quaternionf::IDENTITY
+                            glam::f32::Quat::IDENTITY
                         },
                         position: if flags.contains(xr::ViewStateFlags::POSITION_VALID) {
                             view.pose.position
                         } else {
-                            crate::winlatorxr::XrVector3f::default()
+                            glam::f32::Vec3::ZERO
                         },
                     };
 
@@ -1378,13 +1401,13 @@ impl<G: GraphicsBackend> FrameController<G> {
 
 pub fn is_usable_swapchain<G: xr::Graphics>(
     current: &xr::SwapchainCreateInfo<G>,
-    creation_format: G::Format,
+    creation_format: &G::Format,
     new: &xr::SwapchainCreateInfo<G>,
 ) -> bool
 where
     G::Format: Eq,
 {
-    creation_format == new.format
+    *creation_format == new.format
         && current.width >= new.width
         && current.height >= new.height
         && current.array_size == new.array_size
@@ -1396,7 +1419,7 @@ fn is_valid_swapchain_info<G: xr::Graphics>(info: &xr::SwapchainCreateInfo<G>) -
 }
 
 #[cfg(test)]
-pub use tests::FakeGraphicsData;
+pub use tests::{FakeApi, FakeGraphicsData};
 
 #[cfg(test)]
 mod tests {
@@ -1411,7 +1434,7 @@ mod tests {
 
     pub struct FakeGraphicsData {
         vk: Arc<VulkanData>,
-        swapchain_format: Option<u32>,
+        swapchain_format: Option<u64>,
     }
     thread_local! {
         static SWAPCHAIN_WIDTH: Cell<u32> = const { Cell::new(10) };
@@ -1421,39 +1444,10 @@ mod tests {
 
     pub enum FakeApi {}
     impl xr::Graphics for FakeApi {
-        type Requirements = xr::vulkan::Requirements;
-        type SessionCreateInfo = xr::vulkan::SessionCreateInfo;
+        type SessionCreateInfo = <xr::Vulkan as xr::Graphics>::SessionCreateInfo;
         type Format = <xr::Vulkan as xr::Graphics>::Format;
         type SwapchainImage = <xr::Vulkan as xr::Graphics>::SwapchainImage;
-
-        fn raise_format(x: i64) -> Self::Format {
-            xr::Vulkan::raise_format(x)
-        }
-
-        fn lower_format(x: Self::Format) -> i64 {
-            xr::Vulkan::lower_format(x)
-        }
-
-        fn requirements(
-            instance: &openxr::Instance,
-            system: openxr::SystemId,
-        ) -> openResult<Self::Requirements> {
-            xr::Vulkan::requirements(instance, system)
-        }
-
-        unsafe fn create_session(
-            instance: &openxr::Instance,
-            system: openxr::SystemId,
-            info: &Self::SessionCreateInfo,
-        ) -> openResult<openxr::sys::Session> {
-            unsafe { xr::Vulkan::create_session(instance, system, info) }
-        }
-
-        fn enumerate_swapchain_images(
-            _: &openxr::Swapchain<Self>,
-        ) -> openResult<Vec<Self::SwapchainImage>> {
-            Ok(Vec::new())
-        }
+        type SwapchainCreateInfo = <xr::Vulkan as xr::Graphics>::SwapchainCreateInfo;
     }
 
     impl GraphicsBackend for FakeGraphicsData {
@@ -1461,10 +1455,10 @@ mod tests {
         type OpenVrTexture = <VulkanData as GraphicsBackend>::OpenVrTexture;
         type NiceFormat = <VulkanData as GraphicsBackend>::NiceFormat;
 
-        fn to_nice_format(format: <Self::Api as openxr::Graphics>::Format) -> Self::NiceFormat {
+        fn to_nice_format(format: <Self::Api as xr::Graphics>::Format) -> Self::NiceFormat {
             VulkanData::to_nice_format(format)
         }
-        fn session_create_info(&self) -> <Self::Api as openxr::Graphics>::SessionCreateInfo {
+        fn session_create_info(&self) -> <Self::Api as xr::Graphics>::SessionCreateInfo {
             self.vk.session_create_info()
         }
 
@@ -1477,26 +1471,33 @@ mod tests {
             _: Self::OpenVrTexture,
             _: openvr::VRTextureBounds_t,
             _: openvr::EColorSpace,
-        ) -> openxr::SwapchainCreateInfo<Self::Api> {
-            xr::SwapchainCreateInfo {
-                create_flags: xr::SwapchainCreateFlags::EMPTY,
-                usage_flags: xr::SwapchainUsageFlags::EMPTY,
-                format: SWAPCHAIN_FORMAT.get(),
-                sample_count: 1,
-                width: SWAPCHAIN_WIDTH.get(),
-                height: SWAPCHAIN_HEIGHT.get(),
-                face_count: 1,
-                array_size: 2,
-                mip_count: 1,
-            }
+        ) -> xr::SwapchainCreateInfo<Self::Api> {
+            xr::SwapchainCreateInfo::new(
+                SWAPCHAIN_WIDTH.get(),
+                SWAPCHAIN_HEIGHT.get(),
+                SWAPCHAIN_FORMAT.get() as u64,
+                1,
+                xr::SwapchainCreateFlags::EMPTY,
+                xr::SwapchainUsageFlags::EMPTY,
+                1,
+                2,
+                1,
+            )
         }
 
         fn store_swapchain_images(
             &mut self,
-            _images: Vec<<Self::Api as openxr::Graphics>::SwapchainImage>,
-            format: u32,
+            _images: Vec<<Self::Api as xr::Graphics>::SwapchainImage>,
+            format: <Self::Api as xr::Graphics>::Format,
         ) {
             self.swapchain_format.replace(format);
+        }
+
+        fn swapchain_images_from_handles(
+            &self,
+            handles: Vec<u64>,
+        ) -> Vec<<Self::Api as xr::Graphics>::SwapchainImage> {
+            VulkanData::swapchain_images_from_handles(&self.vk, handles)
         }
 
         fn copy_texture_to_swapchain(
@@ -1507,8 +1508,8 @@ mod tests {
             _bounds: openvr::VRTextureBounds_t,
             _image_index: usize,
             _submit_flags: openvr::EVRSubmitFlags,
-        ) -> opencrate::winlatorxr::XrExtent2Df {
-            crate::winlatorxr::XrExtent2Df::default()
+        ) -> crate::graphics_backends::Extent2Di {
+            crate::graphics_backends::Extent2Di::default()
         }
 
         fn copy_overlay_to_swapchain(
@@ -1516,8 +1517,8 @@ mod tests {
             _texture: Self::OpenVrTexture,
             _bounds: openvr::VRTextureBounds_t,
             _image_index: usize,
-        ) -> opencrate::winlatorxr::XrExtent2Df {
-            crate::winlatorxr::XrExtent2Df::default()
+        ) -> crate::graphics_backends::Extent2Di {
+            crate::graphics_backends::Extent2Di::default()
         }
     }
 
@@ -1597,9 +1598,9 @@ mod tests {
         }
 
         #[track_caller]
-        fn check_frame_state(&self, state: fakexr::FrameState) {
-            let session = self.comp.openxr.session_data.get().session.as_raw();
-            assert_eq!(fakexr::session_frame_state(session), state);
+        fn check_frame_state(&self, state: crate::fakexr::FrameState) {
+            let session = self.comp.openxr.session_data.get().session.as_ref().unwrap().as_raw();
+            assert_eq!(crate::fakexr::session_frame_state(session), state);
         }
     }
 
@@ -1669,6 +1670,61 @@ mod tests {
                 vr::EVRSubmitFlags::Default
             ),
             InvalidBounds
+        );
+    }
+
+    #[test]
+    fn motion_smoothing_unsupported_and_disabled() {
+        let f = Fixture::new();
+        assert!(!f.comp.IsMotionSmoothingSupported());
+        assert!(!f.comp.IsMotionSmoothingEnabled());
+    }
+
+    #[test]
+    fn get_poses_for_frame_returns_poses() {
+        let f = Fixture::new();
+        f.ensure_real_session(false);
+
+        let mut poses = [vr::TrackedDevicePose_t::default(); 16];
+        assert_eq!(
+            f.comp.GetPosesForFrame(0, poses.as_mut_ptr(), poses.len() as u32),
+            vr::EVRCompositorError::None
+        );
+    }
+
+    #[test]
+    fn submit_with_array_index_matches_submit() {
+        let f = Fixture::new();
+        assert_eq!(f.wait_get_poses(), None);
+        assert_eq!(
+            f.comp.SubmitWithArrayIndex(
+                vr::EVREye::Left,
+                &FakeGraphicsData::texture(&f.vk),
+                0,
+                std::ptr::null(),
+                vr::EVRSubmitFlags::Default
+            ),
+            vr::EVRCompositorError::None
+        );
+        assert_eq!(
+            f.comp.SubmitWithArrayIndex(
+                vr::EVREye::Right,
+                &FakeGraphicsData::texture(&f.vk),
+                1,
+                std::ptr::null(),
+                vr::EVRSubmitFlags::Default
+            ),
+            vr::EVRCompositorError::None
+        );
+        assert_eq!(
+            f.comp.SubmitWithArrayIndex(
+                vr::EVREye::Left,
+                &FakeGraphicsData::texture(&f.vk),
+                2,
+                std::ptr::null(),
+                vr::EVRSubmitFlags::Default
+            ),
+            AlreadySubmitted
         );
     }
 
@@ -1872,18 +1928,18 @@ mod tests {
             vr::EVRCompositorTimingMode::Explicit_ApplicationPerformsPostPresentHandoff,
         );
         assert_eq!(f.wait_get_poses(), None);
-        f.check_frame_state(fakexr::FrameState::Waited);
+        f.check_frame_state(crate::fakexr::FrameState::Waited);
 
         assert_eq!(f.comp.SubmitExplicitTimingData(), None);
-        f.check_frame_state(fakexr::FrameState::Begun);
+        f.check_frame_state(crate::fakexr::FrameState::Begun);
 
         assert_eq!(f.submit(vr::EVREye::Left), None);
-        f.check_frame_state(fakexr::FrameState::Begun);
+        f.check_frame_state(crate::fakexr::FrameState::Begun);
         assert_eq!(f.submit(vr::EVREye::Right), None);
-        f.check_frame_state(fakexr::FrameState::Begun);
+        f.check_frame_state(crate::fakexr::FrameState::Begun);
 
         f.comp.PostPresentHandoff();
-        f.check_frame_state(fakexr::FrameState::Ended);
+        f.check_frame_state(crate::fakexr::FrameState::Ended);
     }
 
     #[test]
@@ -1897,7 +1953,7 @@ mod tests {
         assert_eq!(f.wait_get_poses(), None);
         assert_eq!(f.comp.SubmitExplicitTimingData(), None);
         f.comp.PostPresentHandoff();
-        f.check_frame_state(fakexr::FrameState::Ended);
+        f.check_frame_state(crate::fakexr::FrameState::Ended);
     }
 
     #[test]
@@ -1909,9 +1965,9 @@ mod tests {
         );
 
         assert_eq!(f.wait_get_poses(), None);
-        f.check_frame_state(fakexr::FrameState::Waited);
+        f.check_frame_state(crate::fakexr::FrameState::Waited);
         assert_eq!(f.wait_get_poses(), None);
-        f.check_frame_state(fakexr::FrameState::Waited);
+        f.check_frame_state(crate::fakexr::FrameState::Waited);
     }
 
     #[test]
@@ -1923,9 +1979,9 @@ mod tests {
         );
 
         assert_eq!(f.comp.SubmitExplicitTimingData(), None);
-        f.check_frame_state(fakexr::FrameState::Begun);
+        f.check_frame_state(crate::fakexr::FrameState::Begun);
         assert_eq!(f.comp.SubmitExplicitTimingData(), None);
-        f.check_frame_state(fakexr::FrameState::Begun);
+        f.check_frame_state(crate::fakexr::FrameState::Begun);
     }
 
     #[test]
@@ -1939,7 +1995,7 @@ mod tests {
         f.comp.openxr.restart_session();
         assert_eq!(f.wait_get_poses(), None);
 
-        f.check_frame_state(fakexr::FrameState::Waited);
+        f.check_frame_state(crate::fakexr::FrameState::Waited);
     }
 
     #[test]
@@ -1984,9 +2040,9 @@ mod tests {
             overlays.SetOverlayTexture(overlay, &FakeGraphicsData::texture(&f.vk)),
             vr::EVROverlayError::None
         );
-        f.check_frame_state(fakexr::FrameState::Begun);
+        f.check_frame_state(crate::fakexr::FrameState::Begun);
         assert_eq!(overlays.ShowOverlay(overlay), vr::EVROverlayError::None);
         f.comp.PostPresentHandoff();
-        f.check_frame_state(fakexr::FrameState::Ended);
+        f.check_frame_state(crate::fakexr::FrameState::Ended);
     }
 }

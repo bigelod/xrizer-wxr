@@ -14,7 +14,6 @@ pub fn space_relation_to_openvr_pose(pos: Vec3, rot: Quat, valid: bool) -> Track
             vVelocity: HmdVector3_t { v: [0.0, 0.0, 0.0] },
             vAngularVelocity: HmdVector3_t { v: [0.0, 0.0, 0.0] },
             eTrackingResult: ETrackingResult::Running_OutOfRange,
-           ..Default::default()
         };
     }
 
@@ -25,7 +24,6 @@ pub fn space_relation_to_openvr_pose(pos: Vec3, rot: Quat, valid: bool) -> Track
         eTrackingResult: ETrackingResult::Running_OK,
         bPoseIsValid: true,
         bDeviceIsConnected: true,
-       ..Default::default()
     }
 }
 
@@ -56,13 +54,26 @@ impl From<Quat> for HmdQuaternionf_t {
 
 // Build OpenVR 3x4 matrix from (pos, rot)
 impl From<(Vec3, Quat)> for HmdMatrix34_t {
-    fn from((pos, rot): (Vec3, Quat)) -> Self {
-        let rot = Mat3::from_quat(rot).transpose();
+    fn from((pos, q): (Vec3, Quat)) -> Self {
+        // Row-major rotation, matching the layout produced by
+        // `crate::winlatorxr::From<XrPosef>`.
+        let x2 = q.x + q.x;
+        let y2 = q.y + q.y;
+        let z2 = q.z + q.z;
+        let xx = q.x * x2;
+        let xy = q.x * y2;
+        let xz = q.x * z2;
+        let yy = q.y * y2;
+        let yz = q.y * z2;
+        let zz = q.z * z2;
+        let wx = q.w * x2;
+        let wy = q.w * y2;
+        let wz = q.w * z2;
         Self {
             m: [
-                [rot.x_axis.x, rot.y_axis.x, rot.z_axis.x, pos.x],
-                [rot.x_axis.y, rot.y_axis.y, rot.z_axis.y, pos.y],
-                [rot.x_axis.z, rot.y_axis.z, rot.z_axis.z, pos.z],
+                [1.0 - (yy + zz), xy - wz, xz + wy, pos.x],
+                [xy + wz, 1.0 - (xx + zz), yz - wx, pos.y],
+                [xz - wy, yz + wx, 1.0 - (xx + yy), pos.z],
             ],
         }
     }

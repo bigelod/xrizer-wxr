@@ -68,7 +68,7 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
             std::mem::swap(&mut pos.x, &mut pos.z);
             pos.z = -pos.z;
 
-            let r = &mut *rot;
+            let r = &mut rot;
             std::mem::swap(&mut r.x, &mut r.z);
             rot.z = -rot.z;
 
@@ -86,12 +86,12 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         };
 
         for (aux, joint) in AUX_BONES.iter().copied() {
-            xr_joint_to_vr_bone(&joints[joint], &mut transforms[aux as usize]);
+            xr_joint_to_vr_bone(&joints[joint as usize], &mut transforms[aux as usize]);
         }
 
         // The wrists appear to have to some sort of strange orientation compared
         // to the other joints - this rotation fixes it up
-        joints[xr::HandJoint::Wrist] *= Affine3A::from_quat(Quat::from_euler(
+        joints[xr::HandJoint::Wrist as usize] *= Affine3A::from_quat(Quat::from_euler(
             glam::EulerRot::YZXEx,
             -FRAC_PI_2,
             FRAC_PI_2,
@@ -107,7 +107,7 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         let mut parented_joints = joints.clone();
         let mut localize = |joint: xr::HandJoint| {
             let mut parent_id = parent_id.borrow_mut();
-            parented_joints[joint] = joints[*parent_id].inverse() * parented_joints[joint];
+            parented_joints[joint as usize] = joints[*parent_id as usize].inverse() * parented_joints[joint as usize];
             *parent_id = joint;
         };
 
@@ -129,20 +129,20 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         // Currently as is, the hands will point down
         // This rotation corrects them so they are pointing the correct direction
         // Note that it is hand specific.
-        joints[xr::HandJoint::Wrist] *= match hand {
+        joints[xr::HandJoint::Wrist as usize] *= match hand {
             Hand::Left => {
                 Affine3A::from_quat(Quat::from_euler(glam::EulerRot::YZXEx, FRAC_PI_2, PI, 0.0))
             }
             Hand::Right => Affine3A::from_rotation_y(-FRAC_PI_2),
         };
-        transforms[Wrist as usize] = joints[xr::HandJoint::Wrist].into();
+        transforms[Wrist as usize] = joints[xr::HandJoint::Wrist as usize].into();
 
         for (joint, bone) in JOINTS_TO_BONES[1..]
             .iter()
             .flat_map(|list| list.iter())
             .copied()
         {
-            xr_joint_to_vr_bone(&joints[joint], &mut transforms[bone as usize])
+            xr_joint_to_vr_bone(&joints[joint as usize], &mut transforms[bone as usize])
         }
 
         // Convert back to model space if needed
@@ -219,29 +219,29 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
 
             let (metacarpal, proximal, tip) = match i {
                 0 => (
-                    joints[xr::HandJoint::THUMB_METACARPAL],
-                    joints[xr::HandJoint::THUMB_PROXIMAL],
-                    joints[xr::HandJoint::THUMB_TIP],
+                    joints[xr::HandJoint::THUMB_METACARPAL as usize],
+                    joints[xr::HandJoint::THUMB_PROXIMAL as usize],
+                    joints[xr::HandJoint::THUMB_TIP as usize],
                 ),
                 1 => (
-                    joints[xr::HandJoint::INDEX_METACARPAL],
-                    joints[xr::HandJoint::INDEX_PROXIMAL],
-                    joints[xr::HandJoint::INDEX_TIP],
+                    joints[xr::HandJoint::INDEX_METACARPAL as usize],
+                    joints[xr::HandJoint::INDEX_PROXIMAL as usize],
+                    joints[xr::HandJoint::INDEX_TIP as usize],
                 ),
                 2 => (
-                    joints[xr::HandJoint::MIDDLE_METACARPAL],
-                    joints[xr::HandJoint::MIDDLE_PROXIMAL],
-                    joints[xr::HandJoint::MIDDLE_TIP],
+                    joints[xr::HandJoint::MIDDLE_METACARPAL as usize],
+                    joints[xr::HandJoint::MIDDLE_PROXIMAL as usize],
+                    joints[xr::HandJoint::MIDDLE_TIP as usize],
                 ),
                 3 => (
-                    joints[xr::HandJoint::RING_METACARPAL],
-                    joints[xr::HandJoint::RING_PROXIMAL],
-                    joints[xr::HandJoint::RING_TIP],
+                    joints[xr::HandJoint::RING_METACARPAL as usize],
+                    joints[xr::HandJoint::RING_PROXIMAL as usize],
+                    joints[xr::HandJoint::RING_TIP as usize],
                 ),
                 4 => (
-                    joints[xr::HandJoint::LITTLE_METACARPAL],
-                    joints[xr::HandJoint::LITTLE_PROXIMAL],
-                    joints[xr::HandJoint::LITTLE_TIP],
+                    joints[xr::HandJoint::LITTLE_METACARPAL as usize],
+                    joints[xr::HandJoint::LITTLE_PROXIMAL as usize],
+                    joints[xr::HandJoint::LITTLE_TIP as usize],
                 ),
                 _ => unreachable!(),
             };
@@ -362,22 +362,22 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
 
         let thumb_touch = actions
             .thumb_touch
-            .state(&session_data.session, subaction)
+            .state(session_data.session.as_ref().unwrap(), subaction)
             .unwrap()
             .current_state;
         let index_touch = actions
             .index_touch
-            .state(&session_data.session, subaction)
+            .state(session_data.session.as_ref().unwrap(), subaction)
             .unwrap()
             .current_state;
         let index_curl = actions
             .index_curl
-            .state(&session_data.session, subaction)
+            .state(session_data.session.as_ref().unwrap(), subaction)
             .unwrap()
             .current_state;
         let rest_curl = actions
             .rest_curl
-            .state(&session_data.session, subaction)
+            .state(session_data.session.as_ref().unwrap(), subaction)
             .unwrap()
             .current_state;
 
@@ -441,6 +441,138 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
 
         finalize_transforms(bone_it, space, transforms);
     }
+}
+
+/// Synthesize an OpenXR hand skeleton from per-finger curl amounts.
+///
+/// WinlatorXR has no hand tracking; the only hand data available is the
+/// controller pose (position + orientation) and its button states. The curl
+/// amounts are derived from the buttons by the caller and interpolate between
+/// the SteamVR open-hand and fist reference skeletons, so the resulting joints
+/// have plausible real-world bone lengths and bend like a real hand when the
+/// grip/trigger/thumbstick are used.
+///
+/// The joints are expressed in the base space passed to
+/// `HandTracker::locate_hand_joints` (the grip-pose action space at the
+/// controller), matching what an OpenXR runtime would return for a space
+/// anchored at the controller. `curls` is `[thumb, index, middle, ring, pinky]`
+/// in `0.0..=1.0`.
+pub fn synthesize_hand_joints(
+    hand: Hand,
+    curls: [f32; 5],
+) -> crate::winlatorxr::HandJointLocations {
+    use HandSkeletonBone::*;
+
+    let state = FingerState {
+        thumb: curls[0],
+        index: curls[1],
+        middle: curls[2],
+        ring: curls[3],
+        pinky: curls[4],
+        time: std::time::Instant::now(),
+    };
+
+    let (open, fist) = match hand {
+        Hand::Left => (&generated::left_hand::OPENHAND, &generated::left_hand::FIST),
+        Hand::Right => (
+            &generated::right_hand::OPENHAND,
+            &generated::right_hand::FIST,
+        ),
+    };
+
+    // Interpolate each parent-space bone between the open and fist reference
+    // poses using the curl of the finger the bone belongs to.
+    let interpolated = (0..HandSkeletonBone::Count as usize).map(|idx| {
+        let bone = unsafe { std::mem::transmute::<usize, HandSkeletonBone>(idx) };
+        let amount = state.get_bone_state(bone);
+        let (open_pos, open_rot) = bone_transform_to_glam(open[idx]);
+        let (fist_pos, fist_rot) = bone_transform_to_glam(fist[idx]);
+        (open_pos.lerp(fist_pos, amount), open_rot.slerp(fist_rot, amount))
+    });
+
+    // The reference data is in parent space; convert it to model space so the
+    // joints can be expressed relative to the base space origin.
+    let model: Vec<(Vec3, Quat)> = parent_to_model_space_bone_data(interpolated).collect();
+
+    // Inverse of the OpenVR-conversion done in `get_bones_from_hand_tracking`
+    // (`xr_joint_to_vr_bone`): OpenVR model space -> OpenXR base space.
+    let to_xr = |(pos, rot): (Vec3, Quat)| crate::winlatorxr::XrPosef {
+        position: if hand == Hand::Left {
+            Vec3::new(-pos.z, -pos.y, pos.x)
+        } else {
+            Vec3::new(-pos.z, pos.y, pos.x)
+        },
+        orientation: if hand == Hand::Left {
+            Quat::from_xyzw(-rot.z, -rot.y, rot.x, rot.w)
+        } else {
+            Quat::from_xyzw(-rot.z, rot.y, rot.x, rot.w)
+        },
+    };
+
+    fn joint_radius(joint: xr::HandJoint) -> f32 {
+        match joint {
+            xr::HandJoint::Palm => 0.024,
+            xr::HandJoint::Wrist => 0.020,
+            xr::HandJoint::THUMB_METACARPAL => 0.014,
+            xr::HandJoint::THUMB_PROXIMAL => 0.013,
+            xr::HandJoint::THUMB_DISTAL => 0.011,
+            xr::HandJoint::THUMB_TIP => 0.009,
+            xr::HandJoint::INDEX_METACARPAL
+            | xr::HandJoint::MIDDLE_METACARPAL
+            | xr::HandJoint::RING_METACARPAL
+            | xr::HandJoint::LITTLE_METACARPAL => 0.014,
+            xr::HandJoint::INDEX_PROXIMAL
+            | xr::HandJoint::MIDDLE_PROXIMAL
+            | xr::HandJoint::RING_PROXIMAL
+            | xr::HandJoint::LITTLE_PROXIMAL => 0.012,
+            xr::HandJoint::INDEX_INTERMEDIATE
+            | xr::HandJoint::MIDDLE_INTERMEDIATE
+            | xr::HandJoint::RING_INTERMEDIATE
+            | xr::HandJoint::LITTLE_INTERMEDIATE => 0.011,
+            xr::HandJoint::INDEX_DISTAL
+            | xr::HandJoint::MIDDLE_DISTAL
+            | xr::HandJoint::RING_DISTAL
+            | xr::HandJoint::LITTLE_DISTAL => 0.010,
+            xr::HandJoint::INDEX_TIP
+            | xr::HandJoint::MIDDLE_TIP
+            | xr::HandJoint::RING_TIP
+            | xr::HandJoint::LITTLE_TIP => 0.008,
+        }
+    }
+
+    let wrist = model[Wrist as usize];
+    let palm = approximate_palm(&wrist, &model[IndexFinger0 as usize]);
+
+    let mut joint_locations = Vec::with_capacity(26);
+    joint_locations.push(crate::winlatorxr::HandJointLocation {
+        pose: to_xr(palm),
+        radius: joint_radius(xr::HandJoint::Palm),
+    });
+    for (joint, bone) in JOINTS_TO_BONES.iter().flat_map(|list| list.iter()).copied() {
+        joint_locations.push(crate::winlatorxr::HandJointLocation {
+            pose: to_xr(model[bone as usize]),
+            radius: joint_radius(joint),
+        });
+    }
+
+    debug_assert_eq!(joint_locations.len(), 26);
+
+    let joint_radii = joint_locations.iter().map(|joint| joint.radius).collect();
+    crate::winlatorxr::HandJointLocations {
+        joint_count: joint_locations.len() as u32,
+        joint_locations,
+        joint_radii,
+    }
+}
+
+/// Approximate the palm joint as a point between the wrist and the index
+/// metacarpal, which is where the palm center roughly lies. The palm isn't
+/// tracked by the reference skeletons, so this is our best guess.
+fn approximate_palm(wrist: &(Vec3, Quat), index_metacarpal: &(Vec3, Quat)) -> (Vec3, Quat) {
+    (
+        wrist.0 + (index_metacarpal.0 - wrist.0) * 0.35,
+        wrist.1,
+    )
 }
 
 /// trait alias
@@ -682,11 +814,11 @@ macro_rules! skeletal_input_actions {
             $(pub $field: Vec<xr::Path>),+
         }
         impl SkeletalInputBindings {
-            pub fn binding_iter(self, actions: &SkeletalInputActions) -> impl Iterator<Item = xr::Binding<'_>> {
+            pub fn binding_iter(self, actions: &SkeletalInputActions) -> impl Iterator<Item = xr::Binding> {
                 std::iter::empty()
                 $(
                     .chain(
-                        self.$field.into_iter().map(|binding| xr::Binding::new(&actions.$field, binding))
+                        self.$field.into_iter().map(|binding| xr::Binding::new(&actions.$field.path, &binding))
                     )
                 )+
             }
@@ -735,5 +867,40 @@ impl SkeletalInputActionData {
                 rest_curl,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::winlatorxr::HandJoint;
+
+    #[test]
+    fn synthesize_hand_joints_returns_all_26_joints() {
+        for hand in [Hand::Left, Hand::Right] {
+            let joints = super::synthesize_hand_joints(hand, [0.0; 5]);
+            assert_eq!(joints.joint_count, 26);
+            assert_eq!(joints.joint_locations.len(), 26);
+            assert_eq!(joints.joint_radii.len(), 26);
+
+            for joint in &joints.joint_locations {
+                assert!(joint.pose.position.is_finite());
+                assert!(joint.pose.orientation.is_finite());
+            }
+        }
+    }
+
+    #[test]
+    fn curled_finger_tip_converges_on_metacarpal() {
+        let open = super::synthesize_hand_joints(Hand::Right, [0.0; 5]);
+        let fist = super::synthesize_hand_joints(Hand::Right, [0.0, 1.0, 1.0, 1.0, 1.0]);
+
+        let distance = |joints: &crate::winlatorxr::HandJointLocations| {
+            let metacarpal = joints.joint_locations[HandJoint::MIDDLE_METACARPAL as usize].pose.position;
+            let tip = joints.joint_locations[HandJoint::MIDDLE_TIP as usize].pose.position;
+            (metacarpal - tip).length()
+        };
+
+        assert!(distance(&fist) < distance(&open));
     }
 }

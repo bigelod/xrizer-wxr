@@ -111,10 +111,10 @@ mod tests {
                 .unwrap();
 
             assert!(
-                fakexr::check_no_suggested_bindings(action, profile),
+                crate::fakexr::check_no_suggested_bindings(action, profile),
                 "Expected no bindings for action {:?} - got {:#?}",
                 action_name,
-                fakexr::get_suggested_bindings(action, profile)
+                crate::fakexr::get_suggested_bindings(action, profile)
             );
         }
     }

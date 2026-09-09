@@ -4,14 +4,23 @@ This is a modification of the xrizer project to convert it from "OpenVR -> OpenX
 
 This modification was created with the help of OpenCode, Visual Studio Code, and the Z.AI Coding Plan (GLM-4.7) and includes the full AI instructions and documentation in /docs
 
-1. IMPLEMENTATION_PLAN.md -> The overall guide of this project specifically (created with AI assistance / PLAN mode)
+1. IMPLEMENTATION_PLAN.md -> The original AI-generated plan for this project (historical; annotated with implementation deviations)
 2. WINLATORXR_INTEGRATION.md -> WinlatorXR specific information for the AI to understand it (hand made)
 3. PROTOCOL.md -> The WinlatorXR XrAPI UDP traffic data (input and output) explained (hand made)
-4. TASK_BREAKDOWN.md -> The step-by-step breakdown of the work to be done (created with AI assistance / PLAN mode)
-5. PROGRESS_PLAN.md -> The current overall progress of the project (created by AI)
-6. CONTINUED_DEVELOPMENT.md -> The most recent status of the project, so that an agent can continue from where a previous one had finished if there is a sudden connection or power loss, or a token limit has been hit (created by AI)
+4. TASK_BREAKDOWN.md -> The step-by-step breakdown of tasks (historical; most tasks complete; annotated with deviations)
+5. PROGRESS_PLAN.md -> The current working status: what's implemented, what's stubbed, and what remains (created by AI, current as of Aug 2026)
+6. FIX_TESTS.md -> The test suite status and history of how the broken test code was fixed (created by AI, current as of Aug 2026)
 
-The project is still a total work in progress and is a bit of a testbed for using AI assisted coding for WinlatorXR conversions, it is not intended to be representative of other XrAPI works hand-made for WinlatorXR, nor does it reflect the quality of the original project it is based upon for OpenVR to OpenXR conversions.
+The OpenVR interface layer is complete and tests are green. Runtime integration (DX11 texture pipeline, button state wiring) requires a WinlatorXR host environment to test.
+
+# Deployment (WinlatorXR)
+
+Build with `cargo build --release`; the result is `target/release/xrizer_wxr.dll`. It can be used two ways (WinlatorXR can ship/swap these files per game shortcut):
+
+1. **Drop-in client DLL** (preferred): copy it as `openvr_api.dll` beside the game executable. The DLL exports the client entry points (`VR_InitInternal`, `VR_ShutdownInternal`, `VR_GetGenericInterface`, `VR_IsHmdPresent`, `VR_GetStringForHmdError`, `VR_GetInitTokenAndVersion`), so games link against it directly with no `openvrpaths.vrpath` or `VR_OVERRIDE` setup.
+2. **Runtime directory**: copy it as `<runtime_dir>/bin/win64/openvr_api.dll` and point the game at the runtime via a `runtime` entry in `$XDG_CONFIG_HOME/openvr/openvrpaths.vrpath`, or set `VR_OVERRIDE=<runtime_dir>` (a directory, see below).
+
+For troubleshooting, set `RUST_LOG=debug` on the game process; logs go to stderr and `$XDG_STATE_HOME/xrizer/xrizer.txt`.
 
 Please do not bother any developers of the original xrizer project with requests or questions related to this derivative work.
 

@@ -137,7 +137,7 @@ pub fn load_action_sets(
     Ok(action_sets)
 }
 
-fn create_action<T: crate::winlatorxr::ActionTy>(
+fn create_action<T: crate::winlatorxr::ActionTy + 'static>(
     instance: &crate::winlatorxr::Instance,
     data: &ActionDataCommon,
     sets: &mut HashMap<String, crate::winlatorxr::ActionSet>,
@@ -157,7 +157,7 @@ fn create_action<T: crate::winlatorxr::ActionTy>(
         warn!("Action set {set_name} is missing from manifest, creating it...");
         let set = create_action_set(instance, set_name, None).map_err(|e| {
             error!("Creating implicit action set failed: {e:?}");
-            vr::EVRInputError::VRInputError_NameInvalid
+            vr::EVRInputError::NameNotFound
         })?;
         entry = sets.entry(set_name.to_string()).insert_entry(set);
         entry.get()
@@ -175,13 +175,15 @@ fn create_action<T: crate::winlatorxr::ActionTy>(
     trace!("Creating action {xr_friendly_name} (localized: {localized}) in set {set_name:?}");
 
     set.create_action(&xr_friendly_name, localized, paths)
+        .map_err(|_| vr::EVRInputError::InvalidParam)
         .or_else(|err| {
             // If we get a duplicated localized name, just deduplicate it and try again
-            if err == vr::EVRInputError::VRInputError_NameInvalid {
+            if err == vr::EVRInputError::NameNotFound {
                 // Action names are inherently unique, so just throw it at the end of the
                 // localized name to make it a unique
                 let localized = format!("{localized} ({xr_friendly_name})");
                 set.create_action(&xr_friendly_name, &localized, paths)
+                    .map_err(|_| vr::EVRInputError::InvalidParam)
             } else {
                 Err(err)
             }

@@ -1,5 +1,36 @@
 # Task Breakdown: Resumable AI Workflow
 
+> **Implementation Status (Aug 27 2026)**: All 39 tasks are substantially complete. `cargo check --tests` = 0 errors, `cargo test --workspace` = 81 passed + 1 smoke test. See [PROGRESS_PLAN.md](PROGRESS_PLAN.md) for current status.
+
+## Phase Completion Summary
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: UDP Communication | ✅ Complete | `src/udp_communication.rs` implemented |
+| Phase 2: Pose Parsing | ✅ Complete | `parse_winlator_pose` + `parse_winlator_buttons` |
+| Phase 3: Instance | ✅ Complete | `src/winlatorxr.rs` (not `wxr_data.rs` — see deviations) |
+| Phase 4: Space and Pose Tracking | ✅ Complete | `Space::locate_with_pose` implemented; `Space::locate` is identity stub |
+| Phase 5: Haptic Feedback | ✅ Complete | `send_haptic` + `apply_feedback` wired |
+| Phase 6: Frame Management | ✅ Complete | `wait_frame` busy-loop, `end_frame` with SBS detection |
+| Phase 7: DirectX 11 Backend | ✅ Complete | `src/graphics_backends/directx11.rs` |
+| Phase 8: Remove OpenGL | ✅ Complete | `gl.rs` deleted; OpenGL types return `InvalidGraphicsBinding` |
+| Phase 9: Build Config | ✅ Complete | `Cargo.toml` updated; `workspace.members = ["openvr", "macros"]` |
+| Phase 10: Platform Cleanup | ✅ Complete | Windows-only; Linux refs removed |
+| Phase 11: Core Integration | ⚠️ Partial | Done but with deviations (see IMPLEMENTATION_PLAN.md) |
+| Phase 12: Testing | ✅ Complete | 81 lib tests + 1 smoke test passing |
+| Phase 13: Documentation | ⚠️ Partial | README partially updated; PROGRESS_PLAN rewritten; IMPLEMENTATION_PLAN annotated |
+
+### Key Deviations
+
+- **Task 11.1**: `openxr_data.rs` → `winlatorxr.rs` (not `wxr_data.rs`)
+- **Task 11.2**: `mod winlatorxr;` in lib.rs (not `mod wxr_data;`)
+- **Phase 5**: `fakexr` is an in-crate `#[cfg(test)]` module (not a workspace member); root `fakexr/` directory deleted
+- **Phase 7 tests**: Uses `fakexr` test double + compositor module tests + `test-cdylib` smoke test (not standalone UDP unit tests as originally planned)
+
+---
+
+## Task Format
+
 This document breaks down the OpenVR -> WinlatorXR XrAPI implementation into granular, resumable feature-level tasks. Each task includes dependencies, verification steps, and recovery strategies for reliable AI/sub-agent completion.
 
 ---

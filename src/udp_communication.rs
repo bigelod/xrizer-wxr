@@ -10,6 +10,7 @@ pub struct UdpComm {
     target_ip: Ipv4Addr,
 }
 
+#[derive(Clone)]
 pub struct WinlatorPoseData {
     pub left_hand_quat: Quat,
     pub left_hand_thumb: Vec2,
@@ -58,6 +59,21 @@ impl std::fmt::Display for UdpError {
 
 impl std::error::Error for UdpError {}
 
+/// Formats a `WinlatorHapticData` packet into the XrAPI UDP Tx CSV:
+/// `L_VIBE,R_VIBE,VR,SBS,FOV_W,FOV_H` (space-separated, see PROTOCOL.md).
+pub fn format_haptic_message(data: &WinlatorHapticData) -> String {
+    let sbs_flag = if data.sbs_flag { "1" } else { "0" };
+    format!(
+        "{} {} {} {} {} {}",
+        data.left_vibration,
+        data.right_vibration,
+        data.vr_flag,
+        sbs_flag,
+        data.target_fov_w,
+        data.target_fov_h
+    )
+}
+
 impl UdpComm {
     pub fn new() -> Result<Self, UdpError> {
         use socket2::{Socket, Domain, Type, Protocol};
@@ -67,14 +83,26 @@ impl UdpComm {
 
         let receiver = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
             .map_err(|e| UdpError::BindFailed(e.to_string()))?;
+        // Non-blocking so the pose receiver thread can poll its shutdown flag
+        // instead of blocking forever in `recv_from`.
+        receiver
+            .set_nonblocking(true)
+            .map_err(|e| UdpError::BindFailed(e.to_string()))?;
 
-        let receiver_port = match receiver.bind(&SocketAddrV4::new(target_ip, 7872).into()) {
+        // Try the well-known Winlator ports first, then fall back to an
+        // ephemeral port. This keeps parallel test runs (and multiple
+        // instances) from failing to bind.
+        let _receiver_port = match receiver.bind(&SocketAddrV4::new(target_ip, 7872).into()) {
             Ok(_) => 7872,
-            Err(_) => {
-                receiver.bind(&SocketAddrV4::new(target_ip, 7873).into())
-                    .map_err(|e| UdpError::BindFailed(e.to_string()))?;
-                7873
-            }
+            Err(_) => match receiver.bind(&SocketAddrV4::new(target_ip, 7873).into()) {
+                Ok(_) => 7873,
+                Err(_) => {
+                    receiver
+                        .bind(&SocketAddrV4::new(target_ip, 0).into())
+                        .map_err(|e| UdpError::BindFailed(e.to_string()))?;
+                    0
+                }
+            },
         };
 
         let transmitter = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
@@ -94,16 +122,7 @@ impl UdpComm {
         use socket2::Socket;
         use std::net::SocketAddrV4;
 
-        let sbs_flag = if data.sbs_flag { "1" } else { "0" };
-        let message = format!(
-            "{} {} {} {} {} {}",
-            data.left_vibration,
-            data.right_vibration,
-            data.vr_flag,
-            sbs_flag,
-            data.target_fov_w,
-            data.target_fov_h
-        );
+        let message = format_haptic_message(data);
 
         let target = SocketAddrV4::new(self.target_ip, 7278);
         self.transmitter.send_to(message.as_bytes(), &target.into())
@@ -113,12 +132,15 @@ impl UdpComm {
     }
 
     pub fn receive_pose(&self) -> Result<Option<String>, UdpError> {
-        let mut buffer = [0u8; 4096];
+        let mut buffer = [std::mem::MaybeUninit::<u8>::uninit(); 4096];
 
         match self.receiver.recv_from(&mut buffer) {
             Ok((len, _addr)) => {
                 if len > 0 {
-                    std::str::from_utf8(&buffer[..len])
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(buffer.as_ptr() as *const u8, len)
+                    };
+                    std::str::from_utf8(bytes)
                         .map(|s| Some(s.to_string()))
                         .map_err(|e| UdpError::ReceiveFailed(e.to_string()))
                 } else {
@@ -196,7 +218,7 @@ pub fn parse_winlator_pose(data: &str) -> Result<WinlatorPoseData, UdpError> {
         fov_v: parts[28].parse().map_err(|e| UdpError::ParseError(format!("FOV V: {}", e)))?,
         frame_id: parts[29].parse().map_err(|e| UdpError::ParseError(format!("Frame ID: {}", e)))?,
         buttons: parse_winlator_buttons(buttons_str)?,
-        immersive_mode: if flags_str.len() > 0 { flags_str.chars().next() == Some('T') } else { false },
+        immersive_mode: flags_str.starts_with('T'),
         sbs_mode: if flags_str.len() > 1 { flags_str.chars().nth(1) == Some('T') } else { false },
     })
 }
@@ -234,9 +256,35 @@ mod tests {
         let buttons_str = "TFFFFFFFFFTTTFFFFFT";
         let buttons = parse_winlator_buttons(buttons_str).unwrap();
 
-        assert_eq!(buttons[0], true);  // Left Grip
-        assert_eq!(buttons[1], false); // Left Menu
-        assert_eq!(buttons[10], true); // Right Button A
-        assert_eq!(buttons[18], true); // Right Trigger
+        assert!(buttons[0]);  // Left Grip
+        assert!(!buttons[1]); // Left Menu
+        assert!(buttons[10]); // Right Button A
+        assert!(buttons[18]); // Right Trigger
+    }
+
+    #[test]
+    fn startup_packet_matches_protocol_example() {
+        let data = WinlatorHapticData {
+            left_vibration: 0.0,
+            right_vibration: 0.0,
+            vr_flag: 1,
+            sbs_flag: false,
+            target_fov_w: 104.5,
+            target_fov_h: 104.5,
+        };
+        assert_eq!(format_haptic_message(&data), "0 0 1 0 104.5 104.5");
+    }
+
+    #[test]
+    fn haptic_message_formats_sbs_and_vibration() {
+        let data = WinlatorHapticData {
+            left_vibration: 0.5,
+            right_vibration: 0.25,
+            vr_flag: 2,
+            sbs_flag: true,
+            target_fov_w: 90.0,
+            target_fov_h: 95.5,
+        };
+        assert_eq!(format_haptic_message(&data), "0.5 0.25 2 1 90 95.5");
     }
 }

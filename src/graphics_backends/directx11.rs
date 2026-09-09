@@ -4,17 +4,13 @@ use openvr as vr;
 use std::collections::HashMap;
 use std::result::Result as StdResult;
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_SRV_DIMENSION_TEXTURE2D,
+};
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
 use windows::core::*;
-
-pub type D3D_DRIVER_TYPE = u32;
-pub const D3D_DRIVER_TYPE_HARDWARE: D3D_DRIVER_TYPE = 1;
-pub const D3D_DRIVER_TYPE_NULL: D3D_DRIVER_TYPE = 0;
-pub const D3D_DRIVER_TYPE_WARP: D3D_DRIVER_TYPE = 2;
-pub const D3D_DRIVER_TYPE_REFERENCE: D3D_DRIVER_TYPE = 3;
-pub const D3D_DRIVER_TYPE_SOFTWARE: D3D_DRIVER_TYPE = 4;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Extent2D {
@@ -51,9 +47,9 @@ pub struct DirectX11;
 
 impl Graphics for DirectX11 {
     type SwapchainImage = ID3D11Texture2D;
-    type Format = u64;
+    type Format = DXGI_FORMAT;
     type SessionCreateInfo = VulkanSessionCreateInfo;
-    type SwapchainCreateInfo = crate::winlatorxr::SwapchainCreateInfo;
+    type SwapchainCreateInfo = crate::winlatorxr::SwapchainCreateInfo<DirectX11>;
 }
 
 impl DirectX11Data {
@@ -65,13 +61,13 @@ impl DirectX11Data {
             let result = D3D11CreateDevice(
                 None,
                 D3D_DRIVER_TYPE_HARDWARE,
-                None,
+                HMODULE::default(),
                 D3D11_CREATE_DEVICE_DEBUG,
                 None,
                 D3D11_SDK_VERSION,
-                &mut device,
+                Some(&mut device),
                 None,
-                &mut context,
+                Some(&mut context),
             );
 
             if let Err(e) = result {
@@ -105,7 +101,7 @@ impl DirectX11Data {
 impl GraphicsBackend for DirectX11Data {
     type Api = DirectX11;
     type OpenVrTexture = vr::Texture_t;
-    type NiceFormat = u64;
+    type NiceFormat = DXGI_FORMAT;
 
     fn to_nice_format(format: <Self::Api as Graphics>::Format) -> Self::NiceFormat {
         format
@@ -131,17 +127,17 @@ impl GraphicsBackend for DirectX11Data {
     ) -> <Self::Api as Graphics>::SwapchainCreateInfo {
         let extent = unsafe { self.get_texture_extent(&texture) };
 
-        <Self::Api as Graphics>::SwapchainCreateInfo {
-            width: extent.width,
-            height: extent.height,
-            format: 28, // DXGI_FORMAT_R8G8B8A8_UNORM as u64
-            sample_count: 1,
-            create_flags: SwapchainCreateFlags(0),
-            usage_flags: SwapchainUsageFlags { bits: 3 },
-            face_count: 1,
-            array_size: 2,
-            mip_count: 1,
-        }
+        crate::winlatorxr::SwapchainCreateInfo::<DirectX11>::new(
+            extent.width,
+            extent.height,
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            1,
+            SwapchainCreateFlags(0),
+            SwapchainUsageFlags { bits: 3 },
+            1,
+            2,
+            1,
+        )
     }
 
     fn store_swapchain_images(
@@ -151,6 +147,18 @@ impl GraphicsBackend for DirectX11Data {
     ) {
         // Store swapchain images for DirectX 11
         todo!("Store swapchain images for DirectX 11")
+    }
+
+    fn swapchain_images_from_handles(
+        &self,
+        handles: Vec<u64>,
+    ) -> Vec<<Self::Api as Graphics>::SwapchainImage> {
+        handles
+            .into_iter()
+            .map(|handle| unsafe {
+                std::mem::transmute::<*mut std::ffi::c_void, ID3D11Texture2D>(handle as _)
+            })
+            .collect()
     }
 
     fn copy_texture_to_swapchain(
@@ -182,7 +190,7 @@ impl GraphicsBackend for DirectX11Data {
                     0, 0, 0,
                     src_texture,
                     0,
-                    &src_box,
+                    Some(&src_box as *const D3D11_BOX),
                 );
 
                 Extent2Di {
@@ -222,27 +230,30 @@ impl DirectX11Data {
                     Quality: 0,
                 },
                 Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+                BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
                 CPUAccessFlags: 0u32,
                 MiscFlags: 0u32,
             };
 
             let mut texture = None;
-            self.device.CreateTexture2D(&desc, None, &mut texture)
+            self.device
+                .CreateTexture2D(&desc, None, Some(&mut texture))
                 .map_err(|e| GraphicsError::InitializationFailed(e.to_string()))?;
 
             let srv_desc = D3D11_SHADER_RESOURCE_VIEW_DESC {
                 Format: desc.Format,
-                ViewDimension: D3D11_SRV_DIMENSION(10), // D3D11_SRV_DIMENSION_TEXTURE2D
+                ViewDimension: D3D_SRV_DIMENSION_TEXTURE2D,
                 Anonymous: Default::default(),
             };
 
             let mut srv = None;
-            self.device.CreateShaderResourceView(&texture.as_ref().unwrap(), &srv_desc, &mut srv)
+            self.device
+                .CreateShaderResourceView(texture.as_ref().unwrap(), Some(&srv_desc), Some(&mut srv))
                 .map_err(|e| GraphicsError::InitializationFailed(e.to_string()))?;
 
             let mut rtv = None;
-            self.device.CreateRenderTargetView(&texture.as_ref().unwrap(), None, &mut rtv)
+            self.device
+                .CreateRenderTargetView(texture.as_ref().unwrap(), None, Some(&mut rtv))
                 .map_err(|e| GraphicsError::InitializationFailed(e.to_string()))?;
 
             let swapchain_id = self.swapchains.len() as u64;

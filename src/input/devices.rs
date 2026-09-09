@@ -88,17 +88,19 @@ fn get_hmd_pose(
     session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
     origin: vr::ETrackingUniverseOrigin,
 ) -> Option<vr::TrackedDevicePose_t> {
-    let (location, velocity) = {
-        session_data
-            .view_space
-            .relate(
-                session_data.get_space_for_origin(origin),
-                xr_data.display_time.get(),
-            )
-            .ok()?
-    };
+    let relation = session_data
+        .view_space()
+        .relate(
+            &session_data.get_space_for_origin(origin),
+            xr_data.display_time.get(),
+        )
+        .ok()?;
 
-    Some(vr::space_relation_to_openvr_pose(location, velocity))
+    Some(vr::space_relation_to_openvr_pose(
+        relation.pose.position,
+        relation.pose.orientation,
+        relation.position_valid && relation.orientation_valid,
+    ))
 }
 
 fn get_controller_pose(
@@ -106,7 +108,6 @@ fn get_controller_pose(
     session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
     controller: &TrackedDevice,
     origin: vr::ETrackingUniverseOrigin,
-    hand: Hand,
 ) -> Option<vr::TrackedDevicePose_t> {
     let pose_data = session_data.input_data.pose_data.get()?;
 
@@ -115,20 +116,24 @@ fn get_controller_pose(
         Hand::Right => &pose_data.right_space,
     };
 
-    let (location, velocity) = if let Some(raw) =
+    let relation = if let Some(raw) =
         spaces.try_get_or_init_raw(&controller.profile_data, session_data, pose_data)
     {
         raw.relate(
-            session_data.get_space_for_origin(origin),
+            &session_data.get_space_for_origin(origin),
             xr_data.display_time.get(),
         )
         .ok()?
     } else {
         trace!("Failed to get raw space, returning empty pose");
-        (xr::SpaceLocation::default(), xr::SpaceVelocity::default())
+        xr::SpaceRelation::default()
     };
 
-    Some(vr::space_relation_to_openvr_pose(location, velocity))
+    Some(vr::space_relation_to_openvr_pose(
+        relation.pose.position,
+        relation.pose.orientation,
+        relation.position_valid && relation.orientation_valid,
+    ))
 }
 
 #[cfg(feature = "monado")]
@@ -142,14 +147,18 @@ fn get_generic_tracker_pose(
         return None;
     };
 
-    let (location, velocity) = space
+    let relation = space
         .relate(
-            session_data.get_space_for_origin(origin),
+            &session_data.get_space_for_origin(origin),
             xr_data.display_time.get(),
         )
         .ok()?;
 
-    Some(vr::space_relation_to_openvr_pose(location, velocity))
+    Some(vr::space_relation_to_openvr_pose(
+        relation.pose.position,
+        relation.pose.orientation,
+        relation.position_valid && relation.orientation_valid,
+    ))
 }
 
 impl TrackedDevice {
@@ -183,8 +192,7 @@ impl TrackedDevice {
             TrackedDeviceType::Hmd => get_hmd_pose(xr_data, session_data, origin),
             TrackedDeviceType::Controller { .. } => {
                 get_controller_pose(xr_data, session_data, self, origin)
-            }
-            #[cfg(feature = "monado")]
+            }            #[cfg(feature = "monado")]
             TrackedDeviceType::GenericTracker { .. } => {
                 get_generic_tracker_pose(xr_data, session_data, self, origin)
             }
@@ -208,14 +216,14 @@ impl TrackedDevice {
         };
         let mut skeleton_cache = skeleton_cache.lock().unwrap();
         if let Some(skeleton) = skeleton_cache.get(&base.as_raw().into_raw()) {
-            return *skeleton;
+            return skeleton.clone();
         }
 
         let joints = base
             .locate_hand_joints(hand_tracker.as_ref()?, xr_data.display_time.get())
             .unwrap_or_default();
-        skeleton_cache.insert(base.as_raw().into_raw(), joints);
-        joints
+        skeleton_cache.insert(base.as_raw().into_raw(), Some(joints.clone()));
+        Some(joints)
     }
 
     pub fn clear_pose_cache(&self) {
@@ -486,7 +494,7 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
                     .get_pose(
                         &self.openxr,
                         &session_data,
-                        origin.unwrap_or(session_data.current_origin),
+                        origin.unwrap_or(session_data.current_origin()),
                     )
                     .unwrap_or_default();
             }
@@ -522,7 +530,7 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
         devices.get_device(index)?.get_pose(
             &self.openxr,
             &session_data,
-            origin.unwrap_or(session_data.current_origin),
+            origin.unwrap_or(session_data.current_origin()),
         )
     }
 
@@ -613,8 +621,8 @@ mod tests {
     fn get_tracker_pose() {
         let mut f = Fixture::new();
         f.load_actions(c"actions.json");
-        f.set_interaction_profile::<Knuckles>(fakexr::UserPath::LeftHand);
-        fakexr::add_trackers(f.input.openxr.session_data.get().session.as_raw());
+        f.set_interaction_profile::<Knuckles>(crate::fakexr::UserPath::LeftHand);
+        crate::fakexr::add_trackers(f.input.openxr.session_data.get().session.as_ref().unwrap().as_raw());
 
         let frame = || {
             f.input.openxr.poll_events();
@@ -641,8 +649,8 @@ mod tests {
     fn get_tracker_serial() {
         let mut f = Fixture::new();
         f.load_actions(c"actions.json");
-        f.set_interaction_profile::<Knuckles>(fakexr::UserPath::LeftHand);
-        fakexr::add_trackers(f.input.openxr.session_data.get().session.as_raw());
+        f.set_interaction_profile::<Knuckles>(crate::fakexr::UserPath::LeftHand);
+        crate::fakexr::add_trackers(f.input.openxr.session_data.get().session.as_ref().unwrap().as_raw());
 
         let frame = || {
             f.input.openxr.poll_events();

@@ -115,7 +115,7 @@ pub(super) trait BoolCustomBinding: Sized {
     fn state(
         &self,
         actions: &Self::ExtraActions<Actions>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<Option<xr::ActionState<bool>>>;
 }
@@ -133,7 +133,7 @@ pub(super) enum DpadDirection {
 pub(super) struct DpadActions {
     pub xy: xr::Action<xr::Vector2f>,
     pub click_or_touch: Option<xr::Action<f32>>,
-    pub haptic: Option<xr::Action<Haptic>>,
+    pub haptic: Option<xr::Action<xr::HapticTy>>,
 }
 
 pub(super) struct DpadBindingParams {
@@ -186,7 +186,7 @@ impl BoolCustomBinding for DpadData {
     fn state(
         &self,
         _: &(),
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let action = &self.actions;
@@ -195,7 +195,7 @@ impl BoolCustomBinding for DpadData {
             current_state: false,
             last_change_time: parent_state.last_change_time, // TODO: this is wrong
             changed_since_last_sync: false,
-            active: parent_state.is_active(),
+            is_active: parent_state.is_active(),
         };
 
         let last_active = self.last_state.load(Ordering::Relaxed);
@@ -262,7 +262,7 @@ impl BoolCustomBinding for DpadData {
             if in_bounds && let Some(haptic) = &action.haptic {
                 let haptic_event = HapticVibration::new()
                     .amplitude(0.25)
-                    .duration(xr::Duration::MIN_HAPTIC)
+                    .duration(xr::MIN_HAPTIC)
                     .frequency(xr::FREQUENCY_UNSPECIFIED);
                 let _ = haptic
                     .apply_feedback(session, subaction_path, &haptic_event)
@@ -390,7 +390,7 @@ impl BoolCustomBinding for GrabBindingData {
     fn state(
         &self,
         grabs: &Self::ExtraActions<Actions>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let force_state = grabs.force_action.state(session, subaction_path)?;
@@ -416,7 +416,7 @@ impl BoolCustomBinding for GrabBindingData {
                 current_state: grabbed,
                 changed_since_last_sync,
                 last_change_time: force_state.last_change_time,
-                active: true,
+                is_active: true,
             }))
         }
     }
@@ -462,7 +462,7 @@ impl BoolCustomBinding for ToggleData {
     fn state(
         &self,
         action: &xr::Action<bool>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let state = action.state(session, subaction_path)?;
@@ -491,7 +491,7 @@ impl BoolCustomBinding for ToggleData {
             current_state,
             changed_since_last_sync,
             last_change_time: state.last_change_time,
-                active: true,
+                is_active: true,
         }))
     }
 }
@@ -504,13 +504,13 @@ pub(super) struct ThresholdBindingData<T: ThresholdType> {
 }
 
 pub(super) trait ThresholdType: Sized {
-    type T: xr::ActionTy;
+    type T: xr::ActionTy + 'static;
     const SUFFIX: &str;
     fn action(actions: &mut ExtraActionData) -> &mut Option<xr::Action<Self::T>>;
     fn binding_data(data: ThresholdBindingData<Self>) -> BoolBindingType;
     fn state(
         action: &xr::Action<Self::T>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<xr::ActionState<f32>>;
 }
@@ -528,7 +528,7 @@ impl ThresholdType for Vector2 {
     }
     fn state(
         action: &xr::Action<Self::T>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<xr::ActionState<f32>> {
         let state = action.state(session, subaction_path)?;
@@ -552,7 +552,7 @@ impl ThresholdType for Float {
     }
     fn state(
         action: &xr::Action<Self::T>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<xr::ActionState<f32>> {
         action.state(session, subaction_path)
@@ -620,7 +620,7 @@ impl<T: ThresholdType> BoolCustomBinding for ThresholdBindingData<T> {
     fn state(
         &self,
         action: &Self::ExtraActions<Actions>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let state = T::state(action, session, subaction_path)?;
@@ -650,7 +650,7 @@ impl<T: ThresholdType> BoolCustomBinding for ThresholdBindingData<T> {
             current_state,
             changed_since_last_sync,
             last_change_time: state.last_change_time,
-                active: true,
+                is_active: true,
         }))
     }
 }
@@ -726,7 +726,7 @@ impl BoolCustomBinding for DoubleTapData {
     fn state(
         &self,
         action: &Self::ExtraActions<Actions>,
-        session: &xr::Session<xr::AnyGraphics>,
+        session: &xr::Session<DirectX11>,
         subaction_path: xr::Path,
     ) -> xr::XrResult<Option<xr::ActionState<bool>>> {
         let state = action.state(session, subaction_path)?;
@@ -827,7 +827,7 @@ impl BoolBindingData {
                 let Some(action) = extra_data.$action_name.as_ref() else {
                     return Ok(None);
                 };
-                $data.state(action, &session.session, subaction_path)
+                $data.state(action, session.session.as_ref().unwrap(), subaction_path)
             }};
         }
 
@@ -836,12 +836,14 @@ impl BoolBindingData {
         }
 
         let mut last_state = self.last_state.lock().unwrap();
-        if let BindingState::Synced(state) = *last_state {
-            return Ok(state);
+        if let BindingState::Synced(state) = &*last_state {
+            return Ok(state.clone());
         }
 
         let state = match &self.ty {
-            BoolBindingType::Dpad(dpad) => dpad.state(&(), &session.session, subaction_path),
+            BoolBindingType::Dpad(dpad) => {
+                dpad.state(&(), session.session.as_ref().unwrap(), subaction_path)
+            }
             BoolBindingType::Toggle(toggle) => {
                 get_state!(toggle, toggle_action)
             }
@@ -859,7 +861,7 @@ impl BoolBindingData {
             }
         }?;
 
-        *last_state = BindingState::Synced(state);
+        *last_state = BindingState::Synced(state.clone());
         Ok(state)
     }
 }
@@ -873,8 +875,8 @@ mod tests {
     use crate::input::profiles::vive_controller::ViveWands;
     use crate::input::tests::{ExtraActionType, Fixture};
     use crate::winlatorxr::Hand;
-    use fakexr::ActionState;
-    use fakexr::UserPath::*;
+    use crate::fakexr::ActionState;
+    use crate::fakexr::UserPath::*;
     use openvr as vr;
     use slotmap::Key;
 
@@ -1010,14 +1012,14 @@ mod tests {
         get_dpad_action!(f, boolact, dpad_data, ViveWands);
 
         f.set_interaction_profile::<ViveWands>(LeftHand);
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data.xy.as_raw(),
-            fakexr::ActionState::Vector2(0.0, 0.55),
+            crate::fakexr::ActionState::Vector2(0.0, 0.55),
             LeftHand,
         );
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data.click_or_touch.as_ref().unwrap().as_raw(),
-            fakexr::ActionState::Float(1.0),
+            crate::fakexr::ActionState::Float(1.0),
             LeftHand,
         );
 
@@ -1041,9 +1043,9 @@ mod tests {
         assert!(state.bState);
         assert!(!state.bChanged);
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data.xy.as_raw(),
-            fakexr::ActionState::Vector2(0.55, 0.0),
+            crate::fakexr::ActionState::Vector2(0.55, 0.0),
             LeftHand,
         );
         f.sync(vr::VRActiveActionSet_t {
@@ -1093,9 +1095,9 @@ mod tests {
         assert!(!state.bActive);
         assert!(!state.bChanged);
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             f.get_action::<bool>(boolact),
-            fakexr::ActionState::Bool(true),
+            crate::fakexr::ActionState::Bool(true),
             LeftHand,
         );
         f.sync(vr::VRActiveActionSet_t {
@@ -1125,14 +1127,14 @@ mod tests {
         assert_ne!(dpad_data_vive.xy.as_raw(), dpad_data_knuckles.xy.as_raw());
 
         f.set_interaction_profile::<ViveWands>(LeftHand);
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data_vive.xy.as_raw(),
-            fakexr::ActionState::Vector2(0.0, 0.55),
+            crate::fakexr::ActionState::Vector2(0.0, 0.55),
             LeftHand,
         );
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data_vive.click_or_touch.as_ref().unwrap().as_raw(),
-            fakexr::ActionState::Float(1.0),
+            crate::fakexr::ActionState::Float(1.0),
             LeftHand,
         );
 
@@ -1147,9 +1149,9 @@ mod tests {
         assert!(state.bChanged);
 
         f.set_interaction_profile::<Knuckles>(LeftHand);
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data_knuckles.xy.as_raw(),
-            fakexr::ActionState::Vector2(0.0, 0.0),
+            crate::fakexr::ActionState::Vector2(0.0, 0.0),
             LeftHand,
         );
         f.sync(vr::VRActiveActionSet_t {
@@ -1163,9 +1165,9 @@ mod tests {
         assert!(!state.bState);
         assert!(!state.bChanged);
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data_knuckles.xy.as_raw(),
-            fakexr::ActionState::Vector2(0.0, 0.55),
+            crate::fakexr::ActionState::Vector2(0.0, 0.55),
             LeftHand,
         );
         f.sync(vr::VRActiveActionSet_t {
@@ -1191,9 +1193,9 @@ mod tests {
         assert!(state.bState);
         assert!(!state.bChanged);
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             dpad_data_vive.xy.as_raw(),
-            fakexr::ActionState::Vector2(0.0, 0.0),
+            crate::fakexr::ActionState::Vector2(0.0, 0.0),
             LeftHand,
         );
 
@@ -1255,7 +1257,7 @@ mod tests {
             .unwrap();
         assert!(!std::ptr::eq(left_binding, right_binding));
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             left_binding.actions.xy.as_raw(),
             ActionState::Vector2(1.0, 0.0),
             LeftHand,
@@ -1313,14 +1315,14 @@ mod tests {
 
         f.set_interaction_profile::<Knuckles>(LeftHand);
         let mut value_state_check = |force, value, state, changed, line| {
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 grab_data.force_action.as_raw(),
-                fakexr::ActionState::Float(force),
+                crate::fakexr::ActionState::Float(force),
                 LeftHand,
             );
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 grab_data.value_action.as_raw(),
-                fakexr::ActionState::Float(value),
+                crate::fakexr::ActionState::Float(value),
                 LeftHand,
             );
             f.sync(vr::VRActiveActionSet_t {
@@ -1361,14 +1363,14 @@ mod tests {
         f.set_interaction_profile::<Knuckles>(RightHand);
 
         let mut value_state_check = |force, value, hand, state, changed, line| {
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 grab_data.force_action.as_raw(),
-                fakexr::ActionState::Float(force),
+                crate::fakexr::ActionState::Float(force),
                 hand,
             );
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 grab_data.value_action.as_raw(),
-                fakexr::ActionState::Float(value),
+                crate::fakexr::ActionState::Float(value),
                 hand,
             );
             f.sync(vr::VRActiveActionSet_t {
@@ -1408,14 +1410,14 @@ mod tests {
 
         f.set_interaction_profile::<Knuckles>(RightHand);
         let mut value_state_check = |force, value, state, changed, line| {
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 grab_data.force_action.as_raw(),
-                fakexr::ActionState::Float(force),
+                crate::fakexr::ActionState::Float(force),
                 RightHand,
             );
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 grab_data.value_action.as_raw(),
-                fakexr::ActionState::Float(value),
+                crate::fakexr::ActionState::Float(value),
                 RightHand,
             );
             f.sync(vr::VRActiveActionSet_t {
@@ -1448,9 +1450,9 @@ mod tests {
         get_toggle_action!(f, boolact, toggle_data);
 
         f.set_interaction_profile::<Knuckles>(LeftHand);
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             toggle_data.as_raw(),
-            fakexr::ActionState::Bool(true),
+            crate::fakexr::ActionState::Bool(true),
             LeftHand,
         );
 
@@ -1464,9 +1466,9 @@ mod tests {
         assert!(state.bState);
         assert!(state.bChanged);
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             toggle_data.as_raw(),
-            fakexr::ActionState::Bool(false),
+            crate::fakexr::ActionState::Bool(false),
             LeftHand,
         );
 
@@ -1480,9 +1482,9 @@ mod tests {
         assert!(state.bState);
         assert!(!state.bChanged);
 
-        fakexr::set_action_state(
+        crate::fakexr::set_action_state(
             toggle_data.as_raw(),
-            fakexr::ActionState::Bool(true),
+            crate::fakexr::ActionState::Bool(true),
             LeftHand,
         );
 
@@ -1523,8 +1525,8 @@ mod tests {
 
         f.set_interaction_profile::<Knuckles>(LeftHand);
         f.set_interaction_profile::<Knuckles>(RightHand);
-        fakexr::set_action_state(act, false.into(), LeftHand);
-        fakexr::set_action_state(act, false.into(), RightHand);
+        crate::fakexr::set_action_state(act, false.into(), LeftHand);
+        crate::fakexr::set_action_state(act, false.into(), RightHand);
         f.sync(vr::VRActiveActionSet_t {
             ulActionSet: set1,
             ..Default::default()
@@ -1540,7 +1542,7 @@ mod tests {
         assert!(!s_right.bState);
         assert!(!s_right.bChanged);
 
-        fakexr::set_action_state(act, true.into(), LeftHand);
+        crate::fakexr::set_action_state(act, true.into(), LeftHand);
         f.sync(vr::VRActiveActionSet_t {
             ulActionSet: set1,
             ..Default::default()
@@ -1556,8 +1558,8 @@ mod tests {
         assert!(!s_right.bState);
         assert!(!s_right.bChanged);
 
-        fakexr::set_action_state(act, false.into(), LeftHand);
-        fakexr::set_action_state(act, true.into(), RightHand);
+        crate::fakexr::set_action_state(act, false.into(), LeftHand);
+        crate::fakexr::set_action_state(act, true.into(), RightHand);
         f.sync(vr::VRActiveActionSet_t {
             ulActionSet: set1,
             ..Default::default()
@@ -1593,7 +1595,7 @@ mod tests {
         let act = analog_data.as_raw();
 
         f.set_interaction_profile::<OculusTouch>(LeftHand);
-        fakexr::set_action_state(act, ActionState::Float(0.0), LeftHand);
+        crate::fakexr::set_action_state(act, ActionState::Float(0.0), LeftHand);
         f.sync(vr::VRActiveActionSet_t {
             ulActionSet: set1,
             ..Default::default()
@@ -1604,7 +1606,7 @@ mod tests {
         assert!(!s_left.bState);
         assert!(!s_left.bChanged);
 
-        fakexr::set_action_state(act, ActionState::Float(0.01), LeftHand);
+        crate::fakexr::set_action_state(act, ActionState::Float(0.01), LeftHand);
         f.sync(vr::VRActiveActionSet_t {
             ulActionSet: set1,
             ..Default::default()
@@ -1615,7 +1617,7 @@ mod tests {
         assert!(s_left.bState);
         assert!(s_left.bChanged);
 
-        fakexr::set_action_state(act, ActionState::Float(0.0), LeftHand);
+        crate::fakexr::set_action_state(act, ActionState::Float(0.0), LeftHand);
         f.sync(vr::VRActiveActionSet_t {
             ulActionSet: set1,
             ..Default::default()
@@ -1651,9 +1653,9 @@ mod tests {
         f.load_actions(c"actions.json");
         get_double_action!(f, boolact, double_action);
         let set_action = |state: bool| {
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 double_action.as_raw(),
-                fakexr::ActionState::Bool(state),
+                crate::fakexr::ActionState::Bool(state),
                 LeftHand,
             );
         };
@@ -1703,9 +1705,9 @@ mod tests {
         f.load_actions(c"actions.json");
         get_double_action!(f, boolact, double_action);
         let set_action = |state: bool| {
-            fakexr::set_action_state(
+            crate::fakexr::set_action_state(
                 double_action.as_raw(),
-                fakexr::ActionState::Bool(state),
+                crate::fakexr::ActionState::Bool(state),
                 LeftHand,
             );
         };
@@ -1726,11 +1728,13 @@ mod tests {
         f.verify_bool_state(boolact, inactive_state);
 
         let duration = std::time::Duration::from_millis(DoubleTapData::TIMEOUT_MS as u64 + 1);
-        let late_press_time = xr::Time::from_nanos(duration.as_nanos() as _);
+        let late_press_time = xr::Time::from_nanos(
+            (crate::fakexr::now().0 as i128 + duration.as_nanos() as i128) as i64,
+        );
         let set_action_late = |state| {
-            fakexr::set_action_state_with_time(
+            crate::fakexr::set_action_state_with_time(
                 double_action.as_raw(),
-                fakexr::ActionState::Bool(state),
+                crate::fakexr::ActionState::Bool(state),
                 LeftHand,
                 late_press_time,
             );

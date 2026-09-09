@@ -186,7 +186,7 @@ mod tests {
         );
 
         let handle = f.get_action_handle(c"/actions/set1/in/boolact");
-        let data = f.input.winlatorxr.session_data.read().unwrap();
+        let data = f.input.openxr.session_data.get();
         let actions = data.input_data.get_loaded_actions().unwrap();
         let action = actions.try_get_action(handle).unwrap();
         let extra = actions.try_get_extra(handle).unwrap();
@@ -196,8 +196,8 @@ mod tests {
         };
 
         let grab_data = extra.grab_actions.as_ref().unwrap();
-        let p = f.input.winlatorxr.instance.string_to_path(path).unwrap();
-        let suggested = fakexr::get_suggested_bindings(grab_data.force_action.as_raw(), p);
+        let p = f.input.openxr.instance.string_to_path(path).unwrap();
+        let suggested = crate::fakexr::get_suggested_bindings(grab_data.force_action.as_raw(), p);
         assert!(suggested.contains(&"/user/hand/right/input/squeeze/force".to_string()));
 
         f.verify_bindings::<f32>(

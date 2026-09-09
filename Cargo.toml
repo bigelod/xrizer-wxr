@@ -1,6 +1,6 @@
 [package]
 name = "xrizer-wxr"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
@@ -11,11 +11,11 @@ repository = "https://github.com/bigelod/xrizer-wxr"
 crate-type = ["cdylib"]
 
 [workspace]
-members = ["openvr", "macros", "fakexr"]
+members = ["openvr", "macros"]
 
 [workspace.dependencies]
 derive_more = { version = "2.0.1", features = ["deref", "from", "try_into"] }
-glam = "0.30.4"
+glam = { version = "0.30.4", features = ["scalar-math"] }
 log = "0.4.22"
 slotmap = "1.0.7"
 tracy-client = { version = "0.17.6", features = ["only-localhost"] }
@@ -44,7 +44,7 @@ socket2 = "0.5"
 crossbeam-channel = "0.5"
 parking_lot = "0.12"
 openvr = { path = "openvr" }
-macros = { path = "macros" }
+macros = { path = "macros", features = ["test"] }
 paste = "1.0.15"
 libc = "0.2"
 tracy-client = { workspace = true, optional = true }
@@ -66,3 +66,6 @@ windows = { version = "0.59", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
 ] }
+
+[dev-dependencies]
+test-cdylib = "1.1.0"

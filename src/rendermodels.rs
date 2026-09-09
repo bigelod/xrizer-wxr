@@ -220,7 +220,7 @@ impl vr::IVRRenderModels006_Interface for RenderModels {
             (*state).mTrackingToComponentRenderModel = crate::winlatorxr::XrPosef::IDENTITY.into();
             (*state).mTrackingToComponentLocal = crate::winlatorxr::XrPosef::IDENTITY.into();
             (*state).uProperties =
-                (vr::EVRComponentProperty::IsVisible | vr::EVRComponentProperty::IsStatic).0;
+                (vr::EVRComponentProperty::IsVisible | vr::EVRComponentProperty::IsStatic).0 as u32;
         }
 
         true
@@ -620,7 +620,7 @@ impl OwnedRenderModel {
             normals[ic] += n;
         }
 
-        for (v, n) in verts.iter_mut().zip(normals.into_iter()) {
+        for (v, n) in verts.iter_mut().zip(normals) {
             let n = if n.length_squared() > 0.0 {
                 n.normalize()
             } else {
@@ -960,8 +960,8 @@ mod tests {
 
         let visible = vr::EVRComponentProperty::IsVisible.0;
         let is_static = vr::EVRComponentProperty::IsStatic.0;
-        assert_ne!(state.uProperties & visible, 0);
-        assert_ne!(state.uProperties & is_static, 0);
+        assert_ne!(state.uProperties & (visible as u32), 0);
+        assert_ne!(state.uProperties & (is_static as u32), 0);
     }
 
     #[test]

@@ -21,7 +21,11 @@ impl Chaperone {
 
 impl vr::IVRChaperone004_Interface for Chaperone {
     fn ResetZeroPose(&self, origin: vr::ETrackingUniverseOrigin) {
-        self.openxr.reset_tracking_space(origin);
+        let ty = match origin {
+            vr::ETrackingUniverseOrigin::Seated => crate::winlatorxr::ReferenceSpaceType::Local,
+            _ => crate::winlatorxr::ReferenceSpaceType::Stage,
+        };
+        self.openxr.reset_tracking_space(ty);
     }
 
     fn ForceBoundsVisible(&self, _: bool) {

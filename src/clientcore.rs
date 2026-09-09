@@ -62,6 +62,14 @@ pub struct ClientCore {
 }
 
 impl ClientCore {
+    /// Whether a VR session has been initialized.
+    ///
+    /// Guards the single-DLL entry points (`VR_GetGenericInterface`), which must not touch
+    /// the runtime interfaces until `Init` has succeeded.
+    pub fn is_initialized(&self) -> bool {
+        self.openxr.read().unwrap().is_some()
+    }
+
     pub fn new(version: &CStr) -> Option<Arc<Self>> {
         crate::init_logging();
 

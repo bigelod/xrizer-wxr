@@ -7,6 +7,7 @@ use crate::{
     winlatorxr::*,
 };
 use crate::winlatorxr as xr;
+use ash::vk::Handle;
 use glam::{Mat3, Quat, Vec3};
 use log::{debug, error, trace, warn};
 use openvr as vr;
@@ -191,20 +192,14 @@ impl System {
 
 impl vr::IVRSystem023_Interface for System {
     fn GetRecommendedRenderTargetSize(&self, width: *mut u32, height: *mut u32) {
-        let views = self
-            .openxr
-            .instance
-            .enumerate_view_configuration_views(
-                self.winlatorxr.system_id,
-                xr::ViewConfigurationType::PRIMARY_STEREO,
-            )
-            .unwrap();
+        let session_data = self.winlatorxr.session_data.get();
+        let views = session_data.get_view_configuration_views(xr::ViewConfigurationType::PrimaryStereo);
 
-        if !width.is_null() {
+        if !width.is_null() && !views.is_empty() {
             unsafe { *width = views[0].recommended_image_rect_width };
         }
 
-        if !height.is_null() {
+        if !height.is_null() && !views.is_empty() {
             unsafe { *height = views[0].recommended_image_rect_height };
         }
     }
@@ -237,7 +232,7 @@ impl vr::IVRSystem023_Interface for System {
         bottom: *mut f32,
     ) {
         let ty = self
-            .openxr
+            .winlatorxr
             .session_data
             .get()
             .current_origin_as_reference_space();
@@ -262,7 +257,7 @@ impl vr::IVRSystem023_Interface for System {
         false
     }
     fn GetEyeToHeadTransform(&self, eye: vr::EVREye) -> vr::HmdMatrix34_t {
-        let views = self.get_views(xr::ReferenceSpaceType::VIEW).views;
+        let views = self.get_views(xr::ReferenceSpaceType::View).views;
         let view = views[eye as usize];
         let view_rot = view.pose.orientation;
 
@@ -398,24 +393,36 @@ impl vr::IVRSystem023_Interface for System {
         let session_data = self.winlatorxr.session_data.get();
         let mask = session_data
             .session
+            .as_ref()
+            .unwrap()
             .get_visibility_mask_khr(
-                xr::ViewConfigurationType::PRIMARY_STEREO,
+                xr::ViewConfigurationType::PrimaryStereo,
                 eye as u32,
                 mask_ty,
             )
             .unwrap();
 
-        trace!("openxr mask: {:#?} {:#?}", mask.indices, mask.vertices);
+        let indices = if mask.index_count_output > 0 {
+            unsafe { std::slice::from_raw_parts(mask.indices, mask.index_count_output as usize) }
+        } else {
+            &[]
+        };
+        let vertices = if mask.vertex_count_output > 0 {
+            unsafe { std::slice::from_raw_parts(mask.vertices, mask.vertex_count_output as usize) }
+        } else {
+            &[]
+        };
+
+        trace!("openxr mask: {indices:?} {vertices:?}");
 
         let [mut left, mut right, mut top, mut bottom] = [0.0; 4];
         self.GetProjectionRaw(eye, &mut left, &mut right, &mut top, &mut bottom);
 
         // convert from indices + vertices to just vertices
-        let vertices: Vec<_> = mask
-            .indices
-            .into_iter()
-            .map(|i| {
-                let v = mask.vertices[i as usize];
+        let vertices: Vec<_> = indices
+            .iter()
+            .map(|&i| {
+                let v = vertices[i as usize];
 
                 // It is unclear to me why this scaling is necessary, but OpenComposite does it and
                 // it seems to get games to use the mask correctly.
@@ -738,11 +745,10 @@ impl vr::IVRSystem023_Interface for System {
             return vr::k_unTrackedDeviceIndexInvalid;
         };
 
-        Hand::try_from(role).map_or(vr::k_unTrackedDeviceIndexInvalid, |hand| {
-            input
-                .get_controller_device_index(hand)
-                .unwrap_or(vr::k_unTrackedDeviceIndexInvalid)
-        })
+        let hand: Hand = role.into();
+        input
+            .get_controller_device_index(hand)
+            .unwrap_or(vr::k_unTrackedDeviceIndexInvalid)
     }
     fn ApplyTransform(
         &self,
@@ -822,12 +828,12 @@ impl vr::IVRSystem023_Interface for System {
             return;
         }
 
+        let dev = self.winlatorxr.instance.vulkan_graphics_device(
+            self.winlatorxr.system_id,
+            ash::vk::Instance::from_raw(instance as u64),
+        );
         unsafe {
-            *device = self
-                .openxr
-                .instance
-                .vulkan_graphics_device(self.winlatorxr.system_id, instance as _)
-                .expect("Failed to get vulkan physical device") as _;
+            *device = dev.as_raw();
         }
     }
     fn GetDXGIOutputInfo(&self, _: *mut i32) {
@@ -841,7 +847,7 @@ impl vr::IVRSystem023_Interface for System {
 impl vr::IVRSystem021On022 for System {
     fn ResetSeatedZeroPose(&self) {
         self.winlatorxr
-            .reset_tracking_space(vr::ETrackingUniverseOrigin::Seated);
+            .reset_tracking_space(xr::ReferenceSpaceType::Local);
     }
 }
 
@@ -975,12 +981,7 @@ impl vr::IVRSystem009On011 for System {
 
         if ret && !event.is_null() {
             let event = unsafe { event.as_mut() }.unwrap();
-            event.eventType = if let Ok(t) = vr::EVREventType::try_from(e.eventType) {
-                t
-            } else {
-                error!("Unhandled event type for 0.9.12: {}", e.eventType);
-                return false;
-            };
+            event.eventType = e.eventType;
             event.trackedDeviceIndex = e.trackedDeviceIndex;
             event.data = match e.eventType {
                 x if x == vr::EVREventType::ButtonPress as u32

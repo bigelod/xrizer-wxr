@@ -7,17 +7,68 @@ use super::{
 };
 use crate::{
     input::ActionKey,
-    openxr_data::{FakeCompositor, Hand, OpenXrData},
     vr::{self, IVRInput010_Interface},
+    winlatorxr::{self, Hand, OpenXrData},
 };
-use fakexr::UserPath::*;
-use glam::{Mat4, Quat};
+use crate::fakexr;
+use crate::fakexr::UserPath::*;
+use glam::{Mat4, Quat, Vec3};
 use crate::winlatorxr as xr;
 use slotmap::KeyData;
 use std::collections::HashSet;
 use std::f32::consts::FRAC_PI_4;
-use std::ffi::CStr;
+use std::ffi::{CStr, c_char};
 use std::sync::{Arc, Barrier};
+
+pub(super) struct FakeCompositor {
+    openxr: Arc<OpenXrData<Self>>,
+}
+
+impl FakeCompositor {
+    pub fn new(openxr: &Arc<OpenXrData<Self>>) -> Self {
+        Self {
+            openxr: openxr.clone(),
+        }
+    }
+}
+
+impl openvr::InterfaceImpl for FakeCompositor {
+    fn supported_versions() -> &'static [&'static CStr] {
+        &[]
+    }
+
+    fn get_version(_version: &CStr) -> Option<openvr::InterfaceGetter<Self>> {
+        None
+    }
+}
+
+impl winlatorxr::Compositor for FakeCompositor {
+    fn post_session_restart(
+        &self,
+        _session: &winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
+        _waiter: winlatorxr::FrameWaiter,
+        _stream: winlatorxr::FrameStream<crate::graphics_backends::DirectX11>,
+    ) {
+    }
+
+    fn get_session_create_info(
+        &self,
+        _data: &crate::compositor::CompositorSessionData,
+    ) -> winlatorxr::SessionCreateInfo {
+        winlatorxr::SessionCreateInfo {
+            system_id: self.openxr.system_id,
+            graphics_binding: winlatorxr::GraphicsBinding::Vulkan(
+                winlatorxr::VulkanGraphicsBinding {
+                    instance: ash::vk::Instance::null(),
+                    physical_device: ash::vk::PhysicalDevice::null(),
+                    device: ash::vk::Device::null(),
+                    queue_family_index: 0,
+                    queue_index: 0,
+                },
+            ),
+        }
+    }
+}
 
 static ACTIONS_JSONS_DIR: &CStr = unsafe {
     CStr::from_bytes_with_nul_unchecked(
@@ -45,13 +96,13 @@ pub(super) struct Fixture {
 }
 
 pub(super) trait ActionType: xr::ActionTy {
-    fn get_xr_action(data: &ActionData) -> Result<xr::sys::Action, String>;
+    fn get_xr_action(data: &ActionData) -> Result<xr::RawAction, String>;
 }
 
 macro_rules! impl_action_type {
     ($ty:ty, $err_ty:literal, $pattern:pat => $extract_action:expr) => {
         impl ActionType for $ty {
-            fn get_xr_action(data: &ActionData) -> Result<xr::sys::Action, String> {
+            fn get_xr_action(data: &ActionData) -> Result<xr::RawAction, String> {
                 match data {
                     $pattern => Ok($extract_action),
                     other => Err(format!("Expected {} action, got {other:?}", $err_ty)),
@@ -106,7 +157,7 @@ impl Fixture {
 
     fn verify_bindings_core(
         &self,
-        action: xr::sys::Action,
+        action: xr::RawAction,
         interaction_profile: &str,
         action_name: &CStr,
         action_type: &str,
@@ -119,7 +170,7 @@ impl Fixture {
             .string_to_path(interaction_profile)
             .unwrap();
 
-        let bindings = fakexr::get_suggested_bindings(action, profile);
+        let bindings = crate::fakexr::get_suggested_bindings(action, profile);
 
         let mut found_bindings = Vec::new();
 
@@ -254,7 +305,7 @@ impl Fixture {
     }
 
     #[track_caller]
-    pub fn get_action<T: ActionType>(&self, handle: vr::VRActionHandle_t) -> xr::sys::Action {
+    pub fn get_action<T: ActionType>(&self, handle: vr::VRActionHandle_t) -> xr::RawAction {
         let data = self.input.openxr.session_data.get();
         let actions = data
             .input_data
@@ -276,7 +327,7 @@ impl Fixture {
         &self,
         handle: vr::VRActionHandle_t,
         extra_action_type: ExtraActionType,
-    ) -> Option<xr::sys::Action> {
+    ) -> Option<xr::RawAction> {
         let data = self.input.openxr.session_data.get();
         let actions = data
             .input_data
@@ -343,8 +394,8 @@ impl Fixture {
         }
     }
 
-    pub fn set_interaction_profile<P: InteractionProfile>(&mut self, hand: fakexr::UserPath) {
-        fakexr::set_interaction_profile(
+    pub fn set_interaction_profile<P: InteractionProfile>(&mut self, hand: crate::fakexr::UserPath) {
+        crate::fakexr::set_interaction_profile(
             self.raw_session(),
             hand,
             self.input
@@ -356,8 +407,8 @@ impl Fixture {
         self.pending_profile_change = true;
     }
 
-    pub fn raw_session(&self) -> xr::sys::Session {
-        self.input.openxr.session_data.get().session.as_raw()
+    pub fn raw_session(&self) -> xr::RawSession {
+        self.input.openxr.session_data.get().session.as_ref().unwrap().as_raw()
     }
 }
 
@@ -433,9 +484,9 @@ fn input_state_flow() {
     assert!(!state.bActive);
     assert!(!state.bChanged);
 
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(boolact),
-        fakexr::ActionState::Bool(true),
+        crate::fakexr::ActionState::Bool(true),
         LeftHand,
     );
 
@@ -460,9 +511,9 @@ fn reload_manifest_on_session_restart() {
     f.load_actions(c"actions.json");
     f.input.openxr.restart_session();
 
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(boolact),
-        fakexr::ActionState::Bool(true),
+        crate::fakexr::ActionState::Bool(true),
         LeftHand,
     );
     f.sync(vr::VRActiveActionSet_t {
@@ -487,8 +538,15 @@ pub fn compare_pose(expected: xr::Posef, actual: xr::Posef) {
         "expected position: {epos:?}\nactual position: {apos:?}"
     );
 
+    // Quaternions are double-cover: q and -q represent the same rotation, so
+    // compare them up to an overall sign.
     let erot = expected.orientation;
     let arot = actual.orientation;
+    let (erot, arot) = if erot.dot(arot) < 0.0 {
+        (-erot, arot)
+    } else {
+        (erot, arot)
+    };
     assert!(
         float_eq(arot.x, erot.x)
             && float_eq(arot.y, erot.y)
@@ -528,20 +586,11 @@ fn raw_pose_waitgetposes_and_skeletal_pose_identical() {
 
     let rot = Quat::from_rotation_x(-FRAC_PI_4);
     let pose = xr::Posef {
-        position: xr::Vector3f {
-            x: 0.5,
-            y: 0.5,
-            z: 0.5,
-        },
-        orientation: xr::Quaternionf {
-            x: rot.x,
-            y: rot.y,
-            z: rot.z,
-            w: rot.w,
-        },
+        position: Vec3::new(0.5, 0.5, 0.5),
+        orientation: rot,
     };
-    fakexr::set_grip(f.raw_session(), LeftHand, pose);
-    fakexr::set_aim(f.raw_session(), LeftHand, pose);
+    crate::fakexr::set_grip(f.raw_session(), LeftHand, pose);
+    crate::fakexr::set_aim(f.raw_session(), LeftHand, pose);
 
     let seated_origin = vr::ETrackingUniverseOrigin::Seated;
     let waitgetposes_pose = f
@@ -602,44 +651,44 @@ fn actions_with_bad_paths() {
     let set1 = f.get_action_set_handle(c"/actions/set1");
     f.load_actions(c"actions_malformed_paths.json");
 
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(spaces),
-        fakexr::ActionState::Bool(true),
+        crate::fakexr::ActionState::Bool(true),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<f32>(commas),
-        fakexr::ActionState::Float(0.5),
+        crate::fakexr::ActionState::Float(0.5),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(mixed),
-        fakexr::ActionState::Bool(true),
+        crate::fakexr::ActionState::Bool(true),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(long_bad1),
-        fakexr::ActionState::Bool(false),
+        crate::fakexr::ActionState::Bool(false),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(long_bad2),
-        fakexr::ActionState::Bool(false),
+        crate::fakexr::ActionState::Bool(false),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(long_exact),
-        fakexr::ActionState::Bool(false),
+        crate::fakexr::ActionState::Bool(false),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(paren),
-        fakexr::ActionState::Bool(false),
+        crate::fakexr::ActionState::Bool(false),
         LeftHand,
     );
-    fakexr::set_action_state(
+    crate::fakexr::set_action_state(
         f.get_action::<bool>(brackets),
-        fakexr::ActionState::Bool(false),
+        crate::fakexr::ActionState::Bool(false),
         LeftHand,
     );
     f.sync(vr::VRActiveActionSet_t {
@@ -703,26 +752,18 @@ fn pose_action_no_restrict() {
     f.load_actions(c"actions.json");
     f.set_interaction_profile::<SimpleController>(LeftHand);
     f.set_interaction_profile::<SimpleController>(RightHand);
-    let session = f.input.openxr.session_data.get().session.as_raw();
+    let session = f.input.openxr.session_data.get().session.as_ref().unwrap().as_raw();
     let pose_left = xr::Posef {
-        position: xr::Vector3f {
-            x: 0.5,
-            y: 0.5,
-            z: 0.5,
-        },
-        orientation: xr::Quaternionf::IDENTITY,
+        position: Vec3::new(0.5, 0.5, 0.5),
+        orientation: Quat::IDENTITY,
     };
-    fakexr::set_grip(session, LeftHand, pose_left);
+    crate::fakexr::set_grip(session, LeftHand, pose_left);
 
     let pose_right = xr::Posef {
-        position: xr::Vector3f {
-            x: 0.6,
-            y: 0.6,
-            z: 0.6,
-        },
-        orientation: xr::Quaternionf::IDENTITY,
+        position: Vec3::new(0.6, 0.6, 0.6),
+        orientation: Quat::IDENTITY,
     };
-    fakexr::set_grip(session, RightHand, pose_right);
+    crate::fakexr::set_grip(session, RightHand, pose_right);
 
     f.sync(vr::VRActiveActionSet_t {
         ulActionSet: set1,
@@ -749,26 +790,18 @@ fn raw_pose_switch_profile() {
     f.load_actions(c"actions.json");
     f.set_interaction_profile::<SimpleController>(LeftHand);
     f.set_interaction_profile::<SimpleController>(RightHand);
-    let session = f.input.openxr.session_data.get().session.as_raw();
+    let session = f.input.openxr.session_data.get().session.as_ref().unwrap().as_raw();
     let pose_left = xr::Posef {
-        position: xr::Vector3f {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        orientation: xr::Quaternionf::IDENTITY,
+        position: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
     };
-    fakexr::set_grip(session, LeftHand, pose_left);
+    crate::fakexr::set_grip(session, LeftHand, pose_left);
 
     let pose_right = xr::Posef {
-        position: xr::Vector3f {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        orientation: xr::Quaternionf::IDENTITY,
+        position: Vec3::ZERO,
+        orientation: Quat::IDENTITY,
     };
-    fakexr::set_grip(session, RightHand, pose_right);
+    crate::fakexr::set_grip(session, RightHand, pose_right);
 
     f.sync(vr::VRActiveActionSet_t {
         ulActionSet: set1,
@@ -780,17 +813,8 @@ fn raw_pose_switch_profile() {
         let rotation = Quat::from_mat4(offset);
 
         xr::Posef {
-            orientation: xr::Quaternionf {
-                x: rotation.x,
-                y: rotation.y,
-                z: rotation.z,
-                w: rotation.w,
-            },
-            position: xr::Vector3f {
-                x: translation.x,
-                y: translation.y,
-                z: translation.z,
-            },
+            orientation: rotation,
+            position: translation,
         }
     }
 
@@ -823,7 +847,8 @@ fn raw_pose_switch_profile() {
         assert!(actual.bActive);
         let p = actual.pose;
         assert!(p.bPoseIsValid);
-        compare_pose(offset_to_pose(expected), p.mDeviceToAbsoluteTracking.into());
+        let actual_pose: xr::Posef = p.mDeviceToAbsoluteTracking.into();
+        compare_pose(offset_to_pose(expected), actual_pose);
     }
 }
 
@@ -856,9 +881,9 @@ fn cased_actions() {
     );
 
     f.set_interaction_profile::<ViveWands>(LeftHand);
-    let session = f.input.openxr.session_data.get().session.as_raw();
-    fakexr::set_grip(session, LeftHand, xr::Posef::IDENTITY);
-    fakexr::set_aim(session, LeftHand, xr::Posef::IDENTITY);
+    let session = f.input.openxr.session_data.get().session.as_ref().unwrap().as_raw();
+    crate::fakexr::set_grip(session, LeftHand, xr::Posef::IDENTITY);
+    crate::fakexr::set_aim(session, LeftHand, xr::Posef::IDENTITY);
     f.sync(vr::VRActiveActionSet_t {
         ulActionSet: set1,
         ..Default::default()
@@ -1009,7 +1034,7 @@ fn detect_controller_after_manifest_load() {
     frame();
     assert!(f.input.get_controller_device_index(Hand::Left).is_none());
 
-    f.set_interaction_profile::<Knuckles>(fakexr::UserPath::LeftHand);
+    f.set_interaction_profile::<Knuckles>(crate::fakexr::UserPath::LeftHand);
     frame();
     // Profile won't be set for this frame - we call sync after events have already been polled
     assert!(f.input.get_controller_device_index(Hand::Left).is_none());

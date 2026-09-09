@@ -523,7 +523,7 @@ typedef union
 /** An event posted by the server to all running applications */
 struct VREvent_t
 {
-	EVREventType eventType;
+	uint32_t eventType;
 	TrackedDeviceIndex_t trackedDeviceIndex;
 	VREvent_Data_t data;
 	float eventAgeSeconds;

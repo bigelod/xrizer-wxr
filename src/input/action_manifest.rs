@@ -167,11 +167,18 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
                 &skeletal_input.set,
             ])
             .collect();
-        session_data.session.attach_action_sets(&xr_sets).unwrap();
+        session_data
+            .session
+            .as_ref()
+            .unwrap()
+            .attach_action_sets(&xr_sets)
+            .unwrap();
 
         // Try forcing an interaction profile now
         session_data
             .session
+            .as_ref()
+            .unwrap()
             .sync_actions(&[xr::ActiveActionSet::new(&info_set)])
             .unwrap();
 
@@ -382,7 +389,7 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
             .trigger_click
             .first()
             .unwrap_or_else(|| panic!("Missing trigger_click binding for {}", P::profile_path()));
-        let bindings: Vec<xr::Binding<'_>> = context
+        let bindings: Vec<xr::Binding> = context
             .bindings
             .iter()
             .map(|(name, path)| {
@@ -393,10 +400,10 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
                     .get(name)
                     .unwrap_or_else(|| panic!("Couldn't find data for action {name}"))
                 {
-                    Bool(action) => xr::Binding::new(action, path),
-                    Vector1 { action, .. } => xr::Binding::new(action, path),
-                    Vector2 { action, .. } => xr::Binding::new(action, path),
-                    Haptic(action) => xr::Binding::new(action, path),
+                    Bool(action) => xr::Binding::new(&action.path, &path),
+                    Vector1 { action, .. } => xr::Binding::new(&action.path, &path),
+                    Vector2 { action, .. } => xr::Binding::new(&action.path, &path),
+                    Haptic(action) => xr::Binding::new(&action.path, &path),
                     Skeleton { .. } | Pose => unreachable!(),
                 }
             })
@@ -405,17 +412,17 @@ impl<C: crate::winlatorxr::Compositor> Input<C> {
                     .extra
                     .grip_pose
                     .into_iter()
-                    .map(|path| xr::Binding::new(context.grip_action, path)),
+                    .map(|path| xr::Binding::new(&context.grip_action.path, &path)),
             )
             .chain(std::iter::once(xr::Binding::new(
-                context.info_action,
-                info_action_binding,
+                &context.info_action.path,
+                &info_action_binding,
             )))
             .chain(
                 legacy_bindings
                     .haptic
                     .into_iter()
-                    .map(|path| xr::Binding::new(context.haptic_action, path)),
+                    .map(|path| xr::Binding::new(&context.haptic_action.path, &path)),
             )
             .chain(skeletal_bindings.binding_iter(&context.skeletal_input.actions))
             .collect();

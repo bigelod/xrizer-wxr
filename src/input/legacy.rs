@@ -41,7 +41,7 @@ impl<C: xr::Compositor> Input<C> {
         debug!("setting up legacy actions");
 
         let session_data = self.openxr.session_data.get();
-        let session = &session_data.session;
+        let session = session_data.session.as_ref().unwrap();
         let legacy = LegacyActionData::new(
             &self.openxr.instance,
             self.subaction_paths.left,
@@ -130,12 +130,12 @@ impl<C: xr::Compositor> Input<C> {
         );
 
         if let Err(e) = legacy.actions.haptic.apply_feedback(
-            &data.session,
+            data.session.as_ref().unwrap(),
             hand_path,
             &xr::HapticVibration::new()
                 .amplitude(1.0)
                 .frequency(xr::FREQUENCY_UNSPECIFIED)
-                .duration(xr::Duration::from_nanos(duration_nanos as i64)),
+                .duration(xr::Duration::from_nanos(duration_nanos as u64)),
         ) {
             warn!("Failed to trigger haptic: {e:?}");
         }
@@ -156,12 +156,12 @@ impl<C: xr::Compositor> Input<C> {
         manifest_actions
             .haptic_action
             .apply_feedback(
-                &self.openxr.session_data.get().session,
+                self.openxr.session_data.get().session.as_ref().unwrap(),
                 hand_path,
                 &xr::HapticVibration::new()
                     .amplitude(1.0)
                     .frequency(xr::FREQUENCY_UNSPECIFIED)
-                    .duration(xr::Duration::from_nanos(i64::from(duration_us) * 1000)),
+                    .duration(xr::Duration::from_nanos(u64::from(duration_us) * 1000)),
             )
             .unwrap();
     }
@@ -220,16 +220,16 @@ impl<C: xr::Compositor> Input<C> {
 
         let mut read_button =
             |id, click_action: &xr::Action<bool>, touch_action: Option<&xr::Action<bool>>| {
-                let touch_state = touch_action.map(|a| a.state(&data.session, hand_path).unwrap());
-                let touched = touch_state.is_some_and(|s| s.current_state);
+                let touch_state = touch_action.map(|a| a.state(data.session.as_ref().unwrap(), hand_path).unwrap());
+                let touched = touch_state.as_ref().is_some_and(|s| s.current_state);
                 state.ulButtonTouched |= button_mask_from_id(id) & (touched as u64 * u64::MAX);
 
-                let click_state = click_action.state(&data.session, hand_path).unwrap();
+                let click_state = click_action.state(data.session.as_ref().unwrap(), hand_path).unwrap();
                 let pressed = click_state.current_state;
                 state.ulButtonPressed |= button_mask_from_id(id) & (pressed as u64 * u64::MAX);
 
                 if let Some(events) = &mut events {
-                    if touch_state.is_some_and(|s| s.changed_since_last_sync) {
+                    if touch_state.as_ref().is_some_and(|s| s.changed_since_last_sync) {
                         events.push_back(super::InputEvent {
                             ty: if touched {
                                 vr::EVREventType::ButtonTouch
@@ -269,19 +269,19 @@ impl<C: xr::Compositor> Input<C> {
         read_button(vr::EVRButtonId::Grip, &actions.squeeze_click, None);
         read_button(vr::EVRButtonId::Axis2, &actions.squeeze_click, None);
 
-        let j = actions.main_xy.state(&data.session, hand_path).unwrap();
+        let j = actions.main_xy.state(data.session.as_ref().unwrap(), hand_path).unwrap();
         state.rAxis[0] = vr::VRControllerAxis_t {
             x: j.current_state.x,
             y: j.current_state.y,
         };
 
-        let t = actions.trigger.state(&data.session, hand_path).unwrap();
+        let t = actions.trigger.state(data.session.as_ref().unwrap(), hand_path).unwrap();
         state.rAxis[1] = vr::VRControllerAxis_t {
             x: t.current_state,
             y: 0.0,
         };
 
-        let s = actions.squeeze.state(&data.session, hand_path).unwrap();
+        let s = actions.squeeze.state(data.session.as_ref().unwrap(), hand_path).unwrap();
         state.rAxis[2] = vr::VRControllerAxis_t {
             x: s.current_state,
             y: 0.0,
@@ -342,7 +342,7 @@ impl LegacyBindings {
         self,
         actions: &'a LegacyActions,
         pose_data: &'a PoseData,
-    ) -> impl Iterator<Item = xr::Binding<'a>> {
+    ) -> impl Iterator<Item = xr::Binding> {
         macro_rules! bindings {
             ($begin:expr, $($field:ident),+$(,)?) => {
                 $begin $(
@@ -421,7 +421,8 @@ impl LegacyActionData {
 mod tests {
     use crate::input::profiles::{knuckles::Knuckles, simple_controller::SimpleController};
     use crate::input::tests::{Fixture, compare_pose};
-    use crate::winlatorxr::Hand;
+    use crate::winlatorxr::{self as xr, Hand};
+    use glam::{Quat, Vec3};
     use openvr as vr;
 
     #[repr(C)]
@@ -434,7 +435,7 @@ mod tests {
     }
 
     // A small version of the VREvent_Data_t union - writing to this should not cause UB!
-    #[repr(C)]
+    #[repr(C, align(8))]
     union EventData {
         controller: vr::VREvent_Controller_t,
     }
@@ -482,11 +483,11 @@ mod tests {
     }
 
     fn legacy_input(
-        get_action: impl FnOnce(&super::LegacyActions) -> openxr::sys::Action,
+        get_action: impl FnOnce(&super::LegacyActions) -> crate::winlatorxr::RawAction,
         ids: &[vr::EVRButtonId],
         touch: bool,
     ) {
-        use fakexr::UserPath::*;
+        use crate::fakexr::UserPath::*;
         let mut f = Fixture::new();
         f.input.openxr.restart_session();
 
@@ -505,7 +506,7 @@ mod tests {
                 .actions,
         );
 
-        let get_state = |hand: fakexr::UserPath| {
+        let get_state = |hand: crate::fakexr::UserPath| {
             let mut state = vr::VRControllerState_t::default();
             assert!(f.input.get_legacy_controller_state(
                 match hand {
@@ -540,8 +541,8 @@ mod tests {
         };
 
         let update_action_state = |left_state, right_state| {
-            fakexr::set_action_state(action, fakexr::ActionState::Bool(left_state), LeftHand);
-            fakexr::set_action_state(action, fakexr::ActionState::Bool(right_state), RightHand);
+            crate::fakexr::set_action_state(action, crate::fakexr::ActionState::Bool(left_state), LeftHand);
+            crate::fakexr::set_action_state(action, crate::fakexr::ActionState::Bool(right_state), RightHand);
             f.input.frame_start_update();
         };
 
@@ -707,8 +708,8 @@ mod tests {
 
         f.input.openxr.restart_session();
 
-        f.set_interaction_profile::<SimpleController>(fakexr::UserPath::LeftHand);
-        f.set_interaction_profile::<SimpleController>(fakexr::UserPath::RightHand);
+        f.set_interaction_profile::<SimpleController>(crate::fakexr::UserPath::LeftHand);
+        f.set_interaction_profile::<SimpleController>(crate::fakexr::UserPath::RightHand);
         f.input.frame_start_update();
         f.input.openxr.poll_events();
 
@@ -731,7 +732,7 @@ mod tests {
 
     #[test]
     fn poses_updated() {
-        use fakexr::UserPath::*;
+        use crate::fakexr::UserPath::*;
         let mut f = Fixture::new();
         f.input.openxr.restart_session();
         f.set_interaction_profile::<SimpleController>(LeftHand);
@@ -739,8 +740,8 @@ mod tests {
         f.input.frame_start_update();
         f.input.openxr.poll_events();
 
-        fakexr::set_grip(f.raw_session(), LeftHand, xr::Posef::IDENTITY);
-        fakexr::set_grip(f.raw_session(), RightHand, xr::Posef::IDENTITY);
+        crate::fakexr::set_grip(f.raw_session(), LeftHand, xr::Posef::IDENTITY);
+        crate::fakexr::set_grip(f.raw_session(), RightHand, xr::Posef::IDENTITY);
         f.input.frame_start_update();
 
         let seated_origin = vr::ETrackingUniverseOrigin::Seated;
@@ -759,16 +760,12 @@ mod tests {
         );
 
         let new_pose = xr::Posef {
-            position: xr::Vector3f {
-                x: 0.5,
-                y: 0.5,
-                z: 0.5,
-            },
-            orientation: xr::Quaternionf::IDENTITY,
+            position: Vec3::new(0.5, 0.5, 0.5),
+            orientation: Quat::IDENTITY,
         };
 
-        fakexr::set_grip(f.raw_session(), LeftHand, new_pose);
-        fakexr::set_grip(f.raw_session(), RightHand, new_pose);
+        crate::fakexr::set_grip(f.raw_session(), LeftHand, new_pose);
+        crate::fakexr::set_grip(f.raw_session(), RightHand, new_pose);
         f.input.frame_start_update();
         compare_pose(
             new_pose,
@@ -809,8 +806,8 @@ mod tests {
     fn legacy_haptic() {
         let mut f = Fixture::new();
         f.input.openxr.restart_session();
-        f.set_interaction_profile::<SimpleController>(fakexr::UserPath::LeftHand);
-        f.set_interaction_profile::<SimpleController>(fakexr::UserPath::RightHand);
+        f.set_interaction_profile::<SimpleController>(crate::fakexr::UserPath::LeftHand);
+        f.set_interaction_profile::<SimpleController>(crate::fakexr::UserPath::RightHand);
         f.input.openxr.poll_events();
         f.input.frame_start_update();
 
@@ -828,25 +825,25 @@ mod tests {
             .haptic
             .as_raw();
 
-        assert!(!fakexr::is_haptic_activated(
+        assert!(!crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::LeftHand
+            crate::fakexr::UserPath::LeftHand
         ));
-        assert!(!fakexr::is_haptic_activated(
+        assert!(!crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::RightHand
+            crate::fakexr::UserPath::RightHand
         ));
 
         f.input.legacy_haptic(1, 0, 3000);
-        assert!(fakexr::is_haptic_activated(
+        assert!(crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::LeftHand
+            crate::fakexr::UserPath::LeftHand
         ));
 
         f.input.legacy_haptic(2, 0, 3000);
-        assert!(fakexr::is_haptic_activated(
+        assert!(crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::RightHand
+            crate::fakexr::UserPath::RightHand
         ));
     }
 
@@ -855,8 +852,8 @@ mod tests {
         let mut f = Fixture::new();
         f.load_actions(c"actions.json");
         f.input.openxr.restart_session();
-        f.set_interaction_profile::<SimpleController>(fakexr::UserPath::LeftHand);
-        f.set_interaction_profile::<SimpleController>(fakexr::UserPath::RightHand);
+        f.set_interaction_profile::<SimpleController>(crate::fakexr::UserPath::LeftHand);
+        f.set_interaction_profile::<SimpleController>(crate::fakexr::UserPath::RightHand);
         f.input.openxr.poll_events();
         f.input.frame_start_update();
 
@@ -874,25 +871,25 @@ mod tests {
             .haptic_action
             .as_raw();
 
-        assert!(!fakexr::is_haptic_activated(
+        assert!(!crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::LeftHand
+            crate::fakexr::UserPath::LeftHand
         ));
-        assert!(!fakexr::is_haptic_activated(
+        assert!(!crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::RightHand
+            crate::fakexr::UserPath::RightHand
         ));
 
         f.input.legacy_haptic(1, 0, 3000);
-        assert!(fakexr::is_haptic_activated(
+        assert!(crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::LeftHand
+            crate::fakexr::UserPath::LeftHand
         ));
 
         f.input.legacy_haptic(2, 0, 3000);
-        assert!(fakexr::is_haptic_activated(
+        assert!(crate::fakexr::is_haptic_activated(
             haptic,
-            fakexr::UserPath::RightHand
+            crate::fakexr::UserPath::RightHand
         ));
     }
 }

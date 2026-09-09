@@ -35,6 +35,11 @@ pub trait GraphicsBackend: Into<SupportedBackend> {
         format: <Self::Api as Graphics>::Format,
     );
 
+    fn swapchain_images_from_handles(
+        &self,
+        handles: Vec<u64>,
+    ) -> Vec<<Self::Api as Graphics>::SwapchainImage>;
+
     fn copy_texture_to_swapchain(
         &self,
         eye: vr::EVREye,
@@ -113,7 +118,7 @@ pub trait WithAnyGraphicsOwned<G>: WithAnyGraphicsParams {
 impl SupportedBackend {
     pub fn is_texture_type_supported(texture_type: vr::ETextureType) -> bool {
         match texture_type {
-            vr::ETextureType::Vulkan | vr::ETextureType::D3D11 => true,
+            vr::ETextureType::Vulkan | vr::ETextureType::DirectX => true,
             #[cfg(test)]
             vr::ETextureType::Reserved => true,
             _ => false,
@@ -126,7 +131,7 @@ impl SupportedBackend {
                 let vk_texture = unsafe { &*(texture.handle as *const vr::VRVulkanTextureData_t) };
                 Some(Self::Vulkan(VulkanData::new(vk_texture)))
             }
-            vr::ETextureType::D3D11 => {
+            vr::ETextureType::DirectX => {
                 DirectX11Data::new().ok().map(Self::DirectX11)
             }
             #[cfg(test)]
@@ -144,10 +149,12 @@ pub fn select_preferred_backend() -> Option<SupportedBackend> {
         return Some(SupportedBackend::DirectX11(dx11));
     }
 
-    if let Ok(vulkan) = VulkanData::new_temporary(&crate::winlatorxr::Instance::new().ok()?, crate::winlatorxr::SystemId(0)) {
-        log::info!("Using Vulkan backend (DirectX 11 unavailable)");
-        return Some(SupportedBackend::Vulkan(vulkan));
-    }
+    let vulkan = VulkanData::new_temporary(
+        &crate::winlatorxr::Instance::new().ok()?,
+        crate::winlatorxr::SystemId(0),
+    );
+    log::info!("Using Vulkan backend (DirectX 11 unavailable)");
+    return Some(SupportedBackend::Vulkan(vulkan));
 
     log::error!("No suitable graphics backend found");
     None

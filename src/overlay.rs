@@ -114,28 +114,28 @@ impl OverlayMan {
                     #[rustfmt::skip]
                     const QUAD_POSES: [crate::winlatorxr::XrPosef; 6] = [
                         crate::winlatorxr::XrPosef { // front
-                            position: crate::winlatorxr::XrVector3f { x: 0.0, y: 0.0, z: -SKYBOX_SIZE },
-                            orientation: crate::winlatorxr::Quaternionf { x: 0.0, y: 0.0, z: 1.0, w: 0.0 },
+                            position: vec3(0.0, 0.0, -SKYBOX_SIZE),
+                            orientation: Quat::from_xyzw(0.0, 0.0, 1.0, 0.0),
                         },
                         crate::winlatorxr::XrPosef { // back
-                            position: crate::winlatorxr::XrVector3f { x: 0.0, y: 0.0, z: SKYBOX_SIZE },
-                            orientation: crate::winlatorxr::Quaternionf { x: 1.0, y: 0.0, z: 0.0, w: 0.0 },
+                            position: vec3(0.0, 0.0, SKYBOX_SIZE),
+                            orientation: Quat::from_xyzw(1.0, 0.0, 0.0, 0.0),
                         },
                         crate::winlatorxr::XrPosef { // left
-                            position: crate::winlatorxr::XrVector3f { x: -SKYBOX_SIZE, y: 0.0, z: 0.0 },
-                            orientation: crate::winlatorxr::Quaternionf { x: FRAC_1_SQRT_2, y: 0.0, z: FRAC_1_SQRT_2, w: 0.0 },
+                            position: vec3(-SKYBOX_SIZE, 0.0, 0.0),
+                            orientation: Quat::from_xyzw(FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2, 0.0),
                         },
                         crate::winlatorxr::XrPosef { // right
-                            position: crate::winlatorxr::XrVector3f { x: SKYBOX_SIZE, y: 0.0, z: 0.0 },
-                            orientation: crate::winlatorxr::Quaternionf { x: -FRAC_1_SQRT_2, y: 0.0, z: FRAC_1_SQRT_2, w: 0.0 },
+                            position: vec3(SKYBOX_SIZE, 0.0, 0.0),
+                            orientation: Quat::from_xyzw(-FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2, 0.0),
                         },
                         crate::winlatorxr::XrPosef { // up
-                            position: crate::winlatorxr::XrVector3f { x: 0.0, y: SKYBOX_SIZE, z: 0.0 },
-                            orientation: crate::winlatorxr::Quaternionf {x: 0.0, y: -FRAC_1_SQRT_2, z: FRAC_1_SQRT_2, w: 0.0 },
+                            position: vec3(0.0, SKYBOX_SIZE, 0.0),
+                            orientation: Quat::from_xyzw(0.0, -FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0),
                         },
                         crate::winlatorxr::XrPosef { // down
-                            position: crate::winlatorxr::XrVector3f { x: 0.0, y: -SKYBOX_SIZE, z: 0.0 },
-                            orientation: crate::winlatorxr::Quaternionf {x: 0.0, y: FRAC_1_SQRT_2, z: FRAC_1_SQRT_2, w: 0.0 },
+                            position: vec3(0.0, -SKYBOX_SIZE, 0.0),
+                            orientation: Quat::from_xyzw(0.0, FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0),
                         },
                     ];
 
@@ -162,9 +162,9 @@ impl OverlayMan {
 
     pub fn get_layers<'a, G: xr::Graphics>(
         &self,
-        session: &'a crate::winlatorxr::SessionData<G>,
+        session: &'a crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
         render_skybox: bool,
-    ) -> Vec<OverlayLayer<'a, G>>
+    ) -> Vec<OverlayLayer<G>>
     where
         for<'b> &'b AnySwapchainMap: TryInto<&'b SwapchainMap<G>, Error: std::fmt::Display>,
     {
@@ -198,7 +198,7 @@ impl OverlayMan {
                     .transform
                     .as_ref()
                     .map(|(o, _)| *o)
-                    .unwrap_or(session.current_origin),
+                    .unwrap_or(session.current_origin()),
             );
 
             trace!("overlay rect: {rect:#?}");
@@ -208,12 +208,8 @@ impl OverlayMan {
                 .as_ref()
                 .map(|(_, t)| (*t).into())
                 .unwrap_or(crate::winlatorxr::XrPosef {
-                    position: crate::winlatorxr::XrVector3f {
-                        x: 0.0,
-                        y: 0.0,
-                        z: -0.5,
-                    },
-                    orientation: crate::winlatorxr::Quaternionf::IDENTITY,
+                    position: vec3(0.0, 0.0, -0.5),
+                    orientation: Quat::IDENTITY,
                 });
 
             macro_rules! layer_init {
@@ -236,19 +232,9 @@ impl OverlayMan {
 
             macro_rules! lifetime_extend {
                 ($ty:ident, $layer:expr) => {{
-                    fn lifetime_extend<'a, 'b: 'a, G: xr::Graphics>(
-                        layer: $ty<G>,
-                    ) -> $ty<G> {
-                        // SAFETY: We need to remove the lifetimes to be able to return this layer.
-                        // Internally, CompositionLayerQuad is using the raw OpenXR handles and PhantomData, not actual
-                        // references, so returning it as long as we can guarantee the lifetimes of the space and
-                        // swapchain is fine. Both of these are derived from the SessionData,
-                        // so we should have no lifetime problems.
-                        unsafe { $ty::from_raw(layer.into_raw()) }
-                    }
-
-                    lifetime_extend($layer)
-                }}
+                    // winlatorxr layer types don't carry any lifetimes, so this is a no-op.
+                    $layer
+                }};
             }
 
             match overlay.kind {
@@ -288,11 +274,7 @@ impl OverlayMan {
                         .aspect_ratio(rect.extent.height as f32 / rect.extent.width as f32)
                         .pose(crate::winlatorxr::XrPosef {
                             orientation: pose.orientation,
-                            position: crate::winlatorxr::XrVector3f {
-                                x: center.x,
-                                y: center.y,
-                                z: center.z,
-                            },
+                            position: vec3(center.x, center.y, center.z),
                         });
 
                     let layer = lifetime_extend!(CompositionLayerCylinder, layer);
@@ -323,7 +305,7 @@ impl OverlayMan {
         }
 
         // Sort by z_order asc
-        layers.sort_by(|a, b| a.0.cmp(&b.0));
+        layers.sort_by_key(|x| x.0);
 
         let sorted_layers: Vec<OverlayLayer<_>> = layers.into_iter().map(|(_, l)| l).collect();
 
@@ -340,13 +322,13 @@ impl OverlayMan {
     }
 }
 
-pub struct OverlayLayer<'a, G: xr::Graphics> {
+pub struct OverlayLayer<G: xr::Graphics> {
     /// Only ever None during next_chain_insert
-    layer: Option<OverlayLayerInner<'a, G>>,
+    layer: Option<OverlayLayerInner<G>>,
     color_bias_khr: Option<Box<crate::winlatorxr::CompositionLayerColorScaleBiasKHR>>,
 }
 
-impl<G: xr::Graphics> OverlayLayer<'_, G> {
+impl<G: xr::Graphics> OverlayLayer<G> {
     fn set_alpha(&mut self, alpha: f32) {
         // only one instance is stored, so this would cause segfault due to UAF
         debug_assert!(
@@ -356,7 +338,7 @@ impl<G: xr::Graphics> OverlayLayer<'_, G> {
 
         self.color_bias_khr = {
             let mut payload = Box::new(crate::winlatorxr::CompositionLayerColorScaleBiasKHR {
-                ty: xr::StructureType::COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR,
+                ty: xr::StructureType::CompositionLayerColorScaleBiasKHR,
                 next: std::ptr::null(),
                 color_bias: Default::default(),
                 color_scale: xr::Color4f {
@@ -381,32 +363,19 @@ impl<G: xr::Graphics> OverlayLayer<'_, G> {
     unsafe fn next_chain_insert(&mut self, item: *mut crate::winlatorxr::BaseInStructure) {
         unsafe {
             let new_elem = item.as_mut().unwrap();
-            self.layer = Some(match self.layer.take().unwrap() {
-                OverlayLayerInner::Quad(quad) => {
-                    let mut raw = quad.into_raw();
-                    new_elem.next = raw.next as _;
-                    raw.next = item as *const _;
-                    OverlayLayerInner::Quad(xr::CompositionLayerQuad::from_raw(raw))
-                }
-                OverlayLayerInner::Cylinder(cylinder) => {
-                    let mut raw = cylinder.into_raw();
-                    new_elem.next = raw.next as _;
-                    raw.next = item as *const _;
-                    OverlayLayerInner::Cylinder(crate::winlatorxr::CompositionLayerCylinder::from_raw(raw))
-                }
-                OverlayLayerInner::Equirect2(equirect2) => {
-                    let mut raw = equirect2.into_raw();
-                    new_elem.next = raw.next as _;
-                    raw.next = item as *const _;
-                    OverlayLayerInner::Equirect2(crate::winlatorxr::CompositionLayerEquirect::from_raw(raw))
-                }
-            });
+            let base_next = match self.layer.as_mut().unwrap() {
+                OverlayLayerInner::Quad(quad) => &mut quad.next,
+                OverlayLayerInner::Cylinder(cylinder) => &mut cylinder.next,
+                OverlayLayerInner::Equirect2(equirect2) => &mut equirect2.next,
+            };
+            new_elem.next = *base_next;
+            *base_next = item as *const _;
         }
     }
 }
 
-impl<'a, G: xr::Graphics> From<OverlayLayerInner<'a, G>> for OverlayLayer<'a, G> {
-    fn from(value: OverlayLayerInner<'a, G>) -> Self {
+impl<G: xr::Graphics> From<OverlayLayerInner<G>> for OverlayLayer<G> {
+    fn from(value: OverlayLayerInner<G>) -> Self {
         Self {
             layer: Some(value),
             color_bias_khr: None,
@@ -414,23 +383,23 @@ impl<'a, G: xr::Graphics> From<OverlayLayerInner<'a, G>> for OverlayLayer<'a, G>
     }
 }
 
-impl<'a, G: xr::Graphics> Deref for OverlayLayer<'a, G> {
-    type Target = xr::CompositionLayerBase<'a, G>;
+impl<G: xr::Graphics> Deref for OverlayLayer<G> {
+    type Target = xr::CompositionLayerBase<G>;
     fn deref(&self) -> &Self::Target {
         self.layer.as_ref().unwrap().deref()
     }
 }
 
-pub enum OverlayLayerInner<'a, G: xr::Graphics> {
-    Quad(xr::CompositionLayerQuad<'a, G>),
+pub enum OverlayLayerInner<G: xr::Graphics> {
+    Quad(xr::CompositionLayerQuad<G>),
     // Curved overlays
     Cylinder(xr::CompositionLayerCylinder<G>),
     // Skybox
     Equirect2(xr::CompositionLayerEquirect<G>),
 }
 
-impl<'a, G: xr::Graphics> Deref for OverlayLayerInner<'a, G> {
-    type Target = xr::CompositionLayerBase<'a, G>;
+impl<G: xr::Graphics> Deref for OverlayLayerInner<G> {
+    type Target = xr::CompositionLayerBase<G>;
     fn deref(&self) -> &Self::Target {
         match self {
             OverlayLayerInner::Quad(quad) => quad.deref(),
@@ -455,8 +424,10 @@ supported_apis_enum!(pub(crate) enum AnySwapchainMap: SwapchainMap);
 
 #[derive(Default)]
 pub struct OverlaySessionData {
-    swapchains: Mutex<Option<AnySwapchainMap>>,
+    pub swapchains: Mutex<Option<AnySwapchainMap>>,
 }
+
+pub type OverlayData = OverlaySessionData;
 
 enum OverlayKind {
     Quad,
@@ -530,17 +501,17 @@ impl Overlay {
         #[macros::any_graphics(SupportedBackend)]
         fn set_swapchain_texture<G: GraphicsBackend>(
             backend: &mut G,
-            session_data: &crate::winlatorxr::SessionData<G::Api>,
+            session_data: &crate::winlatorxr::SessionData<crate::graphics_backends::DirectX11>,
             texture_bounds: vr::VRTextureBounds_t,
             map: &mut AnySwapchainMap,
             key: OverlayKey,
             texture: vr::Texture_t,
-        ) -> Result<xr::Extent2Di, vr::EVROverlayError>
+        ) -> Result<crate::graphics_backends::Extent2Di, vr::EVROverlayError>
         where
             for<'a> &'a mut SwapchainMap<G::Api>:
                 TryFrom<&'a mut AnySwapchainMap, Error: std::fmt::Display>,
-            for<'a> &'a GraphicalSession<crate::graphics_backends::DirectX11>: TryInto<&'a Session<G::Api>, Error: std::fmt::Display>,
-            <G::Api as xr::Graphics>::Format: Eq,
+            for<'a> &'a GraphicalSession<crate::graphics_backends::DirectX11>: TryInto<&'a crate::winlatorxr::Session<G::Api>, Error: std::fmt::Display>,
+            <G::Api as xr::Graphics>::Format: Eq + Copy,
         {
             let map: &mut SwapchainMap<G::Api> = map.try_into().unwrap_or_else(|e| {
                 panic!(
@@ -562,11 +533,14 @@ impl Overlay {
                 );
                 let initial_format = info.format;
                 session_data.check_format::<G>(&mut info);
-                let swapchain = session_data.create_swapchain(&info).unwrap();
+                let swapchain = session_data.create_swapchain::<G>(&info).unwrap();
                 let images = swapchain
                     .enumerate_images()
                     .expect("Couldn't enumerate swapchain images");
-                backend.store_swapchain_images(images, info.format);
+                backend.store_swapchain_images(
+                    backend.swapchain_images_from_handles(images),
+                    info.format,
+                );
                 SwapchainData {
                     swapchain,
                     info,
@@ -578,13 +552,13 @@ impl Overlay {
                     .entry(key)
                     .unwrap()
                     .or_insert_with(&mut create_swapchain);
-                if !is_usable_swapchain(&data.info, data.initial_format, &tex_swapchain_info) {
+                if !is_usable_swapchain(&data.info, &data.initial_format, &tex_swapchain_info) {
                     *data = create_swapchain();
                 }
                 &mut data.swapchain
             };
             let idx = swapchain.acquire_image().unwrap();
-            swapchain.wait_image(xr::Duration::INFINITE).unwrap();
+            swapchain.wait_image(xr::INFINITE).unwrap();
 
             let extent = backend.copy_overlay_to_swapchain(b_texture, texture_bounds, idx as usize);
             swapchain.release_image().unwrap();
@@ -1116,12 +1090,7 @@ impl vr::IVROverlay028_Interface for OverlayMan {
             let q = Quat::from_xyzw(o.x, o.y, o.z, o.w).normalize();
             let transform = crate::winlatorxr::XrPosef {
                 position: xr_transform.position,
-                orientation: crate::winlatorxr::Quaternionf {
-                    x: q.x,
-                    y: q.y,
-                    z: q.z,
-                    w: q.w,
-                },
+                orientation: q,
             };
             overlay.transform = Some((origin, transform.into()));
             debug!(
@@ -1429,7 +1398,7 @@ impl vr::IVROverlay021On024 for OverlayMan {
             input_mode,
             line_input_mode,
             if use_minimal_mode {
-                vr::EKeyboardFlags::Minimal.0
+                vr::EKeyboardFlags::Minimal.0 as u32
             } else {
                 0
             },
@@ -1454,7 +1423,7 @@ impl vr::IVROverlay021On024 for OverlayMan {
             input_mode,
             input_line_mode,
             if use_minimal_mode {
-                vr::EKeyboardFlags::Minimal.0
+                vr::EKeyboardFlags::Minimal.0 as u32
             } else {
                 0
             },
