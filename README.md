@@ -2,7 +2,7 @@
 
 This is a modification of the xrizer project to convert it from "OpenVR -> OpenXR" to instead support "OpenVR -> WinlatorXR XrAPI" translation, for attempting to run these PCVR experiences directly within a x86/Wine/Proton based container on Android (Quest / Pico) standalone devices
 
-This modification was created with the help of OpenCode, Visual Studio Code, and the Z.AI Coding Plan (GLM-4.7) and includes the full AI instructions and documentation in /docs
+This modification was created with the help of OpenCode, Visual Studio Code, and the Z.AI Coding Plan (GLM-4.7) as well as Big Pickle (GLM-4.6) and includes the full AI instructions and documentation in /docs
 
 1. IMPLEMENTATION_PLAN.md -> The original AI-generated plan for this project (historical; annotated with implementation deviations)
 2. WINLATORXR_INTEGRATION.md -> WinlatorXR specific information for the AI to understand it (hand made)
